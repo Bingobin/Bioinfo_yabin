@@ -1,0 +1,745 @@
+---
+title: "WT1_mutation_prognosis_analysis"
+author: "Yabin Liu"
+date: "2020/8/12"
+output: html_document
+---
+
+```{r}
+source("~/lyb_proj_20200717/lyb_function.R")
+```
+
+##Part I: validation of WT1 MUT vs WT DEGs
+###01.count matrx & clinical data input
+```{r}
+aml_all_count.matrix <- read.table("/mnt5/BEAT_AML_RNAseq_count/06.count_merge_new/AML_merge.count2.txt",row.names = 1,header = TRUE)
+aml_all_tpm.matrix <- read.table("/mnt5/BEAT_AML_RNAseq_count/06.count_merge_new/AML_merge.count2.tpm.txt",row.names = 1,header = TRUE,stringsAsFactors = FALSE)
+aml_all_wt1.tpm <- read.table("/mnt5/BEAT_AML_RNAseq_count/06.count_merge_new/AML_RNAseq.wt1.anno2.txt",header = TRUE,sep="\t",stringsAsFactors = FALSE)
+#aml_all_wt1.tpm$WT1_tpm <- aml_all_wt1.tpm$WT1_br2
+aml_all_wt1.clinc <- read.table("/mnt5/BEAT_AML_RNAseq_count/06.count_merge_new/AML_combind_clinical.process.txt",header = TRUE,sep="\t",stringsAsFactors = FALSE)
+aml_all_wt1.clinc<-merge(aml_all_wt1.tpm,aml_all_wt1.clinc, by.x=2,by.y=1, all=FALSE)
+aml_all_wt1.clinc <- data.table::as.data.table(aml_all_wt1.clinc)
+aml_all_wt1.clinc[,`:=`(IDH2 = IDH2_p140 + IDH2_p172)]
+```
+
+```{r}
+tmp.df<-aml_all_wt1.tpm %>% filter(Type == "Normal")
+normal.list <- tmp.df$SampleID
+index <- match(normal.list, colnames(aml_all_tpm.matrix))
+aml_all_tpm.matrix.nm <- aml_all_tpm.matrix[,c(1:3,index)]
+```
+
+
+```{r}
+aml_all_wt1.tpm$Source2 <- factor(aml_all_wt1.tpm$Source2, levels=c("BEAT","TARGET","TCGA","CD2017","CD34","MNC"))
+
+ggplot(aml_all_wt1.tpm,aes(x=Source2,y=log2(WT1_tpm),color=Source2)) + geom_boxplot(outlier.shape = NA,show.legend = FALSE) + geom_jitter(size=0.5,show.legend = FALSE) + theme(panel.border = element_rect(fill=NA,linetype = 1),panel.background = element_blank()) + scale_color_manual(values = c(brewer.pal(4,"Paired"),"grey50","black"))
+```
+
+```{r}
+a <- aml_all_wt1.clinc 
+#%>%  filter(Source.x == "BEAT")
+#a <- a[a$isDNAseq=="yes",]
+a <- a[! duplicated(a$PatientId),]
+as.data.frame(table(apply(X = a[, c("FLT3_ITD", "NPM1", "DNMT3A","normal"), drop = FALSE], 1, paste, collapse = "")))
+```
+
+
+###02.Extract BEAT AML and Goupping by WT1 status
+```{r}
+aml_design_primary <- aml_all_wt1.clinc %>%  filter(Source.x == "BEAT" & Type == "Primary")
+aml_design_primary <- aml_design_primary[aml_design_primary$isDNAseq == "yes",]
+aml_design_primary <- aml_design_primary[! duplicated(aml_design_primary$PatientId),]
+
+upper<-quantile(aml_design_primary[aml_design_primary$WT1 != 1,]$WT1_tpm)[4]
+lower<-quantile(aml_design_primary[aml_design_primary$WT1 != 1,]$WT1_tpm)[2]
+aml_design_primary$Group <- "WME"
+aml_design_primary[aml_design_primary$WT1_tpm > as.numeric(upper),]$Group <- "WHE"
+aml_design_primary[aml_design_primary$WT1_tpm <= as.numeric(lower),]$Group <- "WLE"
+aml_design_primary[aml_design_primary$WT1 == 1,]$Group <- "MUT"
+aml_design_primary <- data.frame(SampleID=aml_design_primary$SampleID,WT1_tpm=aml_design_primary$WT1_tpm,Group=aml_design_primary$Group,Time=aml_design_primary$overallSurvival,Status=aml_design_primary$vitalStatus)
+tmp.df<-aml_all_wt1.tpm %>% filter(Type == "Normal")
+tmp.df <- data.frame(SampleID=tmp.df$SampleID,WT1_tpm=tmp.df$WT1_tpm,Group=rep("Normal",nrow(tmp.df)),Time=rep(NA,nrow(tmp.df)),Status=rep(NA,nrow(tmp.df)))
+aml_design_primary <- rbind(aml_design_primary,tmp.df)
+
+aml_design_primary %>% group_by(Group) %>% summarise(mean=mean(WT1_tpm),var=var(WT1_tpm),max=max(WT1_tpm),min=min(WT1_tpm),num=n())
+```
+```{r}
+aml_design_primary$Group <- factor(aml_design_primary$Group, levels=c("MUT","WHE","WME","WLE","Normal"))
+
+ggplot(aml_design_primary,aes(x=Group,y=log2(WT1_tpm),color=Group)) + geom_boxplot(outlier.shape = NA,show.legend = FALSE) + geom_jitter(size=0.5,show.legend = FALSE) + theme(panel.border = element_rect(fill=NA,linetype = 1),panel.background = element_blank()) + scale_color_manual(values = c(brewer.pal(4,"Set1"),"grey50"))
+```
+
+###04.DEGs of AML vs Normal: DESeq2
+```{r}
+#exculed_features.list <- c("TET2", "ASXL1", "IDH1", "IDH2_p140", "IDH2_p172", "EZH2")
+exculed_features.list <- c("WT1","TET2", "IDH1", "IDH2_p140", "IDH2_p172")
+#index <- match(exculed_features.list, colnames(aml_all_wt1.clinc))
+ls_chr<-lapply(exculed_features.list, function(x){
+#  aml_all_wt1.clinc[aml_all_wt1.clinc[,x] == 1,]$SampleID
+  aml_all_wt1.clinc[.(1), on = x, SampleID]
+})
+exculed_sample.list<-unique(do.call(c,ls_chr))
+```
+
+```{r}
+#aml_design.nm<-aml_design_primary[! aml_design_primary$SampleID %in% exculed_sample.list,]
+aml_design.nm<-aml_design_primary
+aml_design.nm$Group <- as.character(aml_design.nm$Group)
+aml_design.nm[aml_design.nm$Group != "Normal",]$Group <- "AML"
+aml_design.nm$Group <- factor(aml_design.nm$Group,levels=c("Normal","AML"))
+aml_design.nm %>% group_by(Group) %>% summarise(n())
+```
+
+```{r}
+aml_count.nm <- aml_all_count.matrix[,as.character(aml_design.nm$SampleID)]
+AML_NM.deg <- DESeq2_DEG_analysis(aml_count.nm, aml_design.nm)
+AML_NM.deg <- DESeq2_DEG_extract(AML_NM.deg, aml_design.nm, plot=FALSE)
+AML_NM.deg.list <- c(AML_NM.deg$up$Row.names,AML_NM.deg$down$Row.names)
+```
+
+###05.Design of MUT vs WT(MUT group: WT1 TET2 IDH1 IHD2)
+
+```{r}
+#aml_design.mut <- aml_design_primary %>% filter(Group == "WHE" | Group == "WME")
+aml_design.mut <- aml_design_primary %>% filter(Group != "Normal" )
+#aml_design.mut<-aml_design.mut[! aml_design.mut$SampleID %in% exculed_sample.list,]
+#aml_design.mut<-rbind(aml_design.mut,aml_design_primary[aml_design_primary$Group=="MUT",])
+#aml_design.mut %>% group_by(Group) %>% summarise(n())
+aml_design.mut$Group <- as.character(aml_design.mut$Group)
+#aml_design.mut[aml_design.mut$Group == "WHE",]$Group <- "WT"
+#aml_design.mut[aml_design.mut$Group == "WME",]$Group <- "WT"
+aml_design.mut$Group <- "WT"
+aml_design.mut[aml_design.mut$SampleID %in% exculed_sample.list,]$Group <- "MUT"
+aml_design.mut$Group <- factor(aml_design.mut$Group,levels=c("WT","MUT"))
+rownames(aml_design.mut) <- as.character(aml_design.mut$SampleID)
+aml_design.mut <- aml_design.mut %>% arrange(Group,WT1_tpm)
+aml_design.mut %>% group_by(Group) %>% summarise(n())
+
+```
+
+```{r}
+aml_count.mut <- aml_all_count.matrix[,as.character(aml_design.mut$SampleID)]
+WT1_MUT.deg <- DESeq2_DEG_analysis(aml_count.mut, aml_design.mut)
+WT1_MUT.deg <- DESeq2_DEG_extract(WT1_MUT.deg, aml_design.mut,plot=TRUE)
+```
+
+##Part II: Gene Enrichment Analysis of DEGS
+
+```{r}
+WT1_MUT.deg$up$Entrez <- TransGeneID(WT1_MUT.deg$up$Symbol, "Symbol", "Entrez", organism = "hsa")
+WT1_MUT.deg$down$Entrez <- TransGeneID(WT1_MUT.deg$down$Symbol, "Symbol", "Entrez", organism = "hsa")
+```
+
+```{r}
+deg.list <- c(na.omit(WT1_MUT.deg$up$Entrez),na.omit(WT1_MUT.deg$down$Entrez))
+```
+
+```{r}
+Enricher <- enrich_combind(deg.list,0.5,0.5)
+```
+
+```{r}
+enricher_plot(Enricher,1:5,1:5,1:5,1:5,1:5,5) + ggtitle("WT1 Mut vs WT DEGs")
+```
+
+##Part III: WGCNA analysis of DEGs
+
+###01.Select  the optimum β value
+```{r}
+wt1_mut.deg.list<-c(WT1_MUT.deg$up$Row.names,WT1_MUT.deg$down$Row.names)
+sample.list <- as.character(aml_design.mut$SampleID)
+wt1_mut.deg.tpm <- aml_all_tpm.matrix[wt1_mut.deg.list,sample.list]
+datExpr <- t(wt1_mut.deg.tpm)
+#sample.list <- as.character(aml_design.nm[aml_design.nm$Group=="AML",]$SampleID)
+#aml_nm.deg.tpm <- aml_all_tpm.matrix[AML_NM.deg.list,sample.list]
+#datExpr <- t(aml_nm.deg.tpm)
+powers = c(c(1:10), seq(from = 12, to=30, by=2))
+powers = c(1:12)
+sft = pickSoftThreshold(datExpr, powerVector = powers, verbose = 5)
+```
+
+```{r}
+  # Plot the results:
+  ##sizeGrWindow(9, 5)
+  par(mfrow = c(1,2));
+  cex1 = 0.9;
+  # Scale-free topology fit index as a function of the soft-thresholding power
+  plot(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+       xlab="Soft Threshold (power)",ylab="Scale Free Topology Model Fit,signed R^2",type="n",
+       main = paste("Scale independence"));
+  text(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+       labels=powers,cex=cex1,col="red");
+  # this line corresponds to using an R^2 cut-off of h
+  abline(h=0.90,col="red")
+  # Mean connectivity as a function of the soft-thresholding power
+  plot(sft$fitIndices[,1], sft$fitIndices[,5],
+       xlab="Soft Threshold (power)",ylab="Mean Connectivity", type="n",
+       main = paste("Mean connectivity"))
+  text(sft$fitIndices[,1], sft$fitIndices[,5], labels=powers, cex=cex1,col="red")
+```
+
+###02.Contruct the co-expression net
+```{r}
+net = blockwiseModules(
+                 datExpr,
+                 power = sft$powerEstimate,
+                 maxBlockSize = 6000,
+                 TOMType = "unsigned", minModuleSize = 30,
+                 reassignThreshold = 0, mergeCutHeight = 0.25,
+                 numericLabels = TRUE, pamRespectsDendro = FALSE,
+                 saveTOMs = TRUE,
+                 saveTOMFileBase = "AS-green-FPKM-TOM",
+                 verbose = 3
+ )
+ table(net$colors)
+```
+
+```{r}
+# Convert labels to colors for plotting
+mergedColors = labels2colors(net$colors)
+table(mergedColors)
+# Plot the dendrogram and the module colors underneath
+plotDendroAndColors(net$dendrograms[[1]], mergedColors[net$blockGenes[[1]]],
+                    "Module colors",
+                    dendroLabels = FALSE, hang = 0.03,
+                    addGuide = TRUE, guideHang = 0.05)
+## assign all of the gene to their corresponding module 
+## hclust for the genes.
+```
+
+###03.Corr analysis of module and clinc trait 
+```{r}
+row_index<-match(sample.list,aml_all_wt1.clinc$SampleID)
+cow_index<-c("ageAtDiagnosis","WT1","WT1_tpm","Sex","vitalStatus","overallSurvival","ELN2017_Myclass")
+datTraits <- aml_all_wt1.clinc[row_index,cow_index,with=FALSE]
+datTraits <- as.data.frame(datTraits)
+#design<-as.data.frame(model.matrix(~0+ datTraits$ELN2017_Myclass))
+#colnames(design) <- c("Adverse","Favorable","Intermediate")
+#datTraits<-cbind(datTraits,design)
+#datTraits<-subset(datTraits,select=-ELN2017_Myclass)
+rownames(datTraits) <- sample.list
+datTraits$overallSurvival <- as.numeric(datTraits$overallSurvival)/365
+datTraits[datTraits$vitalStatus == "Death",]$vitalStatus <- 1
+datTraits[datTraits$vitalStatus == "Alive",]$vitalStatus <- 0
+datTraits[datTraits$Sex == "Male",]$Sex <- 1
+datTraits[datTraits$Sex == "Female",]$Sex <- 0 
+datTraits[datTraits$ELN2017_Myclass == "Favorable",]$ELN2017_Myclass <- 0
+datTraits[datTraits$ELN2017_Myclass == "Intermediate",]$ELN2017_Myclass <- 1
+datTraits[datTraits$ELN2017_Myclass == "Adverse",]$ELN2017_Myclass <- 2
+
+nGenes = ncol(datExpr)
+nSamples = nrow(datExpr)
+
+  moduleColors <- labels2colors(net$colors)
+  # Recalculate MEs with color labels
+  MEs0 = moduleEigengenes(datExpr, moduleColors)$eigengenes
+  MEs = orderMEs(MEs0); ##不同颜色的模块的ME值矩阵(样本vs模块)
+  moduleTraitCor = cor(MEs, datTraits , use = "p");
+  moduleTraitPvalue = corPvalueStudent(moduleTraitCor, nSamples)
+  
+  sizeGrWindow(12,8)
+  # Will display correlations and their p-values
+  textMatrix = paste(signif(moduleTraitCor, 2), "\n(",
+                     signif(moduleTraitPvalue, 1), ")", sep = "");
+  dim(textMatrix) = dim(moduleTraitCor)
+  par(mar = c(6, 8.5, 3, 3));
+  # Display the correlation values within a heatmap plot
+  labeledHeatmap(Matrix = moduleTraitCor,
+                 xLabels = colnames(datTraits),
+                 yLabels = names(MEs),
+                 ySymbols = names(MEs),
+                 colorLabels = FALSE,
+                 colors = greenWhiteRed(50),
+                 textMatrix = textMatrix,
+                 setStdMargins = FALSE,
+                 cex.text = 0.5,
+                 zlim = c(-1,1),
+                 main = paste("Module-trait relationships"))
+```
+
+###03.Analysis of genes in the interested Module
+```{r}
+moduleTraitPvalue <- as.data.frame(moduleTraitPvalue)
+moduleTraitPvalue %>% filter(overallSurvival < 0.05)
+moduleTraitCor[rownames(moduleTraitPvalue %>% filter(overallSurvival < 0.05)),]
+```
+```{r}
+modNames = substring(names(MEs), 3)
+geneModuleMembership = as.data.frame(cor(datExpr, MEs, use = "p"))
+MMPvalue = as.data.frame(corPvalueStudent(as.matrix(geneModuleMembership), nSamples))
+names(geneModuleMembership) = paste("MM", modNames, sep="")
+names(MMPvalue) = paste("p.MM", modNames, sep="")
+```
+```{r}
+geneTraitSignificance = as.data.frame(cor(datExpr, datTraits, use = "p"));
+GSPvalue = as.data.frame(corPvalueStudent(as.matrix(geneTraitSignificance), nSamples));
+names(geneTraitSignificance) = paste("GS.", names(datTraits), sep="");
+names(GSPvalue) = paste("p.GS.", names(datTraits), sep="");
+```
+
+```{r}
+module <- "black"
+trait <- "WT1"
+column <- match(module, modNames);
+column2 <- match(trait, colnames(datTraits))
+moduleGenes <- moduleColors==module;
+sizeGrWindow(7, 7);
+par(mfrow = c(1,1));
+verboseScatterplot(abs(geneModuleMembership[moduleGenes, column]),
+                   abs(geneTraitSignificance[moduleGenes, column2]),
+                   xlab = paste("Module Membership in", module, "module"),
+                   ylab = paste("Gene significance for", trait  , "trait"),
+                   main = paste("Module membership vs. gene significance\n"),
+                   cex.main = 1.2, cex.lab = 1.2, cex.axis = 1.2, col = module)
+```
+
+###04. Relation of module and trait
+```{r}
+geneTree <- net$dendrograms[[1]]; 
+dissTOM <- 1-TOMsimilarityFromExpr(datExpr, power = sft$powerEstimate); 
+plotTOM <- dissTOM^10; 
+diag(plotTOM) <- NA; 
+TOMplot(plotTOM, geneTree, moduleColors, main = "Network heatmap plot, all genes")
+```
+
+```{r}
+MET = orderMEs(cbind(MEs0, datTraits))
+# Plot the relationships among the eigengenes and the trait
+  sizeGrWindow(5,7.5);
+  par(cex = 0.9)
+  plotEigengeneNetworks(MET, "", marDendro = c(0,4,1,2), marHeatmap = c(3,4,1,2), cex.lab = 0.8, xLabelsAngle
+                        = 90)
+  # Plot the dendrogram
+  sizeGrWindow(6,6);
+  par(cex = 1.0)
+  ## 模块的聚类图
+  plotEigengeneNetworks(MET, "Eigengene dendrogram", marDendro = c(0,4,2,0),
+                        plotHeatmaps = FALSE)
+  # Plot the heatmap matrix (note: this plot will overwrite the dendrogram plot)
+  par(cex = 1.0)
+  ## 性状与模块热图
+  plotEigengeneNetworks(MET, "Eigengene adjacency heatmap", marHeatmap = c(3,4,2,2),
+                        plotDendrograms = FALSE, xLabelsAngle = 90)
+```
+
+###05.Extract genes in the interested module 
+```{r}
+module = c("black","red","brown")
+genes = colnames(datExpr) 
+inModule = (moduleColors %in% module);
+#inModule2 = (moduleColors=="magenta");
+modGenes = genes[inModule];
+#modGenes2 = genes[inModule2];
+#modGenes <- c(modGenes,modGenes2)
+gene_id_anno <- read.table("/mnt5/BEAT_AML_RNAseq_count/03.merge_and_combat/gene_id_trans.txt", header = TRUE, sep = "\t",stringsAsFactors=FALSE,row.names = 1)
+index <- match(modGenes,rownames(gene_id_anno))
+degs.wgcna.df<-gene_id_anno[index,]
+degs.wgcna.df <- degs.wgcna.df %>% filter(Type == "protein_coding" | Type == "lincRNA")
+```
+
+```{r}
+risk_gene.list <- degs.wgcna.df$Symbol
+TOM = TOMsimilarityFromExpr(datExpr, power = sft$powerEstimate)
+modTOM = TOM[inModule, inModule]
+dimnames(modTOM) = list(gene_id_anno[index,]$Symbol, gene_id_anno[index,]$Symbol)
+index2 <-match(risk_gene.list,gene_id_anno[index,]$Symbol)
+modTOM_sig <- modTOM[index2,index2] 
+
+cyt = exportNetworkToCytoscape(
+  modTOM_sig,
+  edgeFile = paste("CytoscapeInput-edges-", paste(module, collapse="-"), ".txt", sep=""),
+  nodeFile = paste("CytoscapeInput-nodes-", paste(module, collapse="-"), ".txt", sep=""),
+  weighted = TRUE,
+  threshold = 0.0,
+  nodeNames = risk_gene.list
+#  nodeAttr = moduleColors[inModule]
+)
+```
+
+##Part IV: Lasso-Cox Regression Analysis and Calc the risk score
+
+###01. extract tmp & merge clinc
+```{r}
+col_index <- match(as.character(aml_design.mut$SampleID),colnames(aml_all_tpm.matrix))
+row_index <- match(rownames(degs.wgcna.df), rownames(aml_all_tpm.matrix))
+degs.wgcna.tpm <- aml_all_tpm.matrix[row_index,col_index]
+rownames(degs.wgcna.tpm) <- aml_all_tpm.matrix$Symbol[row_index]
+degs.wgcna.tpm <- t(degs.wgcna.tpm)
+df.cox <- merge(degs.wgcna.tpm, aml_all_wt1.clinc, by.x=0,by.y =2, all=FALSE)
+df.cox[df.cox$vitalStatus  == "Death",]$vitalStatus <- 1
+df.cox[df.cox$vitalStatus  == "Alive",]$vitalStatus <- 0
+df.cox$vitalStatus <- as.numeric(df.cox$vitalStatus)
+df.cox$overallSurvival <- as.numeric(df.cox$overallSurvival)
+df.cox <- df.cox %>% filter(overallSurvival > 0)
+df.cox %>% group_by(vitalStatus) %>% summarise(n())
+```
+
+### 02.Multivariate Cox Regression Analysis
+```{r}
+survobj <- Surv(df.cox$overallSurvival,df.cox$vitalStatus)
+survpre <- as.matrix(df.cox[,degs.wgcna.df$Symbol])
+
+model <- coxph( survobj ~ survpre)
+a<-summary(model)
+a<-a$coefficients
+risk_gene.list <-gsub("survpre","",rownames(a[a[,5] < 0.01 & a[,2] <=10 & a[,2] >=0.1,]))
+#a[a[,5] < 0.05,]
+feature_interest.list <- c("WT1","TET2","IDH1","IDH2","ageAtDiagnosis")
+
+survpre_mut <- df.cox[,feature_interest.list,drop=FALSE]
+#survpre_mut$age <- as.numeric(survpre_mut$age)
+survpre_mut$ageAtDiagnosis <- as.numeric(survpre_mut$ageAtDiagnosis)
+survpre_sig <- df.cox[,risk_gene.list]
+survpre_os <-  df.cox[,c("overallSurvival","vitalStatus")]
+colnames(survpre_os) <- c("Time","Status")
+surv_model.df <- cbind(survpre_sig,survpre_mut)
+surv_model.df <- as.data.frame(row.names = df.cox$Row.names, cbind(surv_model.df,survpre_os))
+surv_model.df <- na.omit(surv_model.df)
+
+survobj <- Surv(surv_model.df$Time,surv_model.df$Status)
+survpre <- as.matrix(surv_model.df[,c(risk_gene.list,feature_interest.list)])
+model <- coxph( survobj ~ survpre)
+hr.cox.sum <-summary(model)
+hr.cox <- as.data.frame(cbind(hr.cox.sum$coefficients, hr.cox.sum$conf.int))
+hr.cox$Feature <- gsub("survpre","",rownames(hr.cox))
+hr.cox <- data.table::as.data.table(hr.cox[,c(10,1,5,6,8,9)])
+colnames(hr.cox) <- c("Feature","Coefficient","Pvalue","Hazard.ratio","HR.Lower.95","HR.Upper.95")
+
+#model <-  coxph( Surv(Time, Status) ~  SP140 + GZMA + PM20D1 + PIGR + PYHIN1 + DNAI2 + CYP4F22 + ZNF683 + PRF1 + AC109826.1 + WT1 + TET2 + IDH1 + IDH2 + ageAtDiagnosis, data = surv_model.df)
+#ggforest(model)
+
+#a<-predict(model,type="lp")
+#b<-rs.df.clinc$Risk_score
+#c<-cbind(a,b)
+```
+
+###03. risk score and plot
+
+```{r}
+ls_df <- lapply(1:nrow(surv_model.df), function(x){
+    sample <- rownames(surv_model.df)[x]
+    score <-sum(sapply(1:nrow(hr.cox),function(i){
+      coef = hr.cox$Coefficient[i]
+      tpm = surv_model.df[x,colnames(surv_model.df) == hr.cox$Feature[i]]
+      coef * tpm
+    }))
+    data.frame(Sample = sample, Risk_score=score)
+  })
+rs.df <- do.call(rbind, ls_df)
+rs.df$RS_norm<-sapply(1:nrow(rs.df),function(i){
+    (rs.df$Risk_score[i] - mean(rs.df$Risk_score))/sd(rs.df$Risk_score)
+})
+rs.df$Risk_Group <- "High_risk"
+rs.df[rs.df$RS_norm < median(rs.df$RS_norm),]$Risk_Group <- "Low_risk"
+rs.df$Sample <- gsub("\\.","-",rs.df$Sample)
+rownames(surv_model.df) <- gsub("\\.","-",rownames(surv_model.df))
+rs.df.clinc <- merge(rs.df,surv_model.df, by.x = 1, by.y =0, all = FALSE)
+rs.df.clinc <- merge(rs.df.clinc, aml_all_wt1.clinc, by.x = 1, by.y =2, all = FALSE)
+```
+
+
+```{r}
+#rs.df.clinc[rs.df.clinc$Time > 10*365,]$Time <- 10*365
+model <- coxph( Surv(Time, Status) ~ Risk_score, data = rs.df.clinc)
+summary(model)
+ggforest(model)
+fit <- survfit(Surv(Time/365, Status) ~ Risk_Group, data= rs.df.clinc)
+ggsurvplot(fit,palette = c("#FF7F00","#1F78B4"),risk.table = TRUE,ncensor.plot=FALSE,pval=TRUE,conf.int = FALSE,xlab="Time in years")
+plot_survial_risk(rs.df.clinc)
+plot_roc_curve(rs.df.clinc)
+```
+
+04.Univariate Cox Regression Analysis
+```{r}
+ls_df <- lapply(2:(ncol(degs.wgcna.tpm)+1), function(i){
+    pretty_aml <- data.frame(time   = df.cox$overallSurvival, 
+                             status = df.cox$vitalStatus, 
+                             TPM    = df.cox[,i])
+    Gene_label <- colnames(df.cox)[i]
+    model <- coxph( Surv(time, status) ~ TPM, data = pretty_aml)
+    cox_result <- summary(model)
+    data.frame(row.names = Gene_label, cox_result$conf.int,PV=cox_result$coefficients[5])
+})
+
+hr <- do.call(rbind, ls_df)
+rm(ls_df)
+hr$rank <- rank(hr$PV,ties.method="first")
+hr <- hr %>% dplyr::arrange(rank)
+#row.names(hr) <- gsub("\\.","-",row.names(hr))
+dim(hr[hr$PV <0.05 & hr$exp.coef.<=10 & hr$exp.coef. >=0.1,])
+```
+
+
+###05. Lasso-cox model select genes 
+```{r}
+#a<-hr[match(risk_gene.list,rownames(hr)),]
+  
+library(glmnet)
+#a <- df.cox[,match(risk_gene.list,colnames(df.cox))]
+a <- df.cox[,match(rownames(hr[hr$PV <0.05 & hr$exp.coef.<=10 & hr$exp.coef. >=0.1,]),colnames(df.cox))]
+#a <- df.cox[,match(degs.wgcna.df$Symbol,colnames(df.cox))]
+#a <- a[,! colnames(a) %in% exculed_features.list]
+rownames(a)<-df.cox$Row.names
+b <- data.frame(time=df.cox$overallSurvival, status=df.cox$vitalStatus)
+rownames(b)<-df.cox$Row.names
+a <- as.matrix(a)
+b <- as.matrix(b)
+fit <- glmnet(a,b,family="cox")
+plot(fit)
+set.seed(40)
+cvfit <- cv.glmnet(a,b,family="cox")
+plot(cvfit)
+cvfit.min <- as.data.frame(as.matrix(coef(cvfit, s = "lambda.min")))
+cvfit.min$Feature <- row.names(cvfit.min)
+colnames(cvfit.min) <- c("Weight", "Feature")
+cvfit.min <- cvfit.min[order(abs(cvfit.min$Weight), decreasing = T),]
+feature.gene <- cvfit.min[which(cvfit.min$Weight != 0),]$Feature
+```
+
+```{r}
+gg<-hr[match(feature.gene, rownames(hr)),]
+colnames(gg) <- c("HR","HR2","lower_HR","upper_HR", "Pvalue", "Rank")
+gg$Symbols <- as.factor(rownames(gg))
+
+ggplot(gg,aes(x=HR,y=Symbols))  + 
+  geom_point(shape=18,size=1,aes(color=-log10(Pvalue))) + 
+  blank + 
+  geom_vline(xintercept = 1,linetype="dotted") + 
+  geom_pointrange(aes(xmin=lower_HR,xmax=upper_HR,color=-log10(Pvalue)),shape=18)+ylab("") + 
+  scale_colour_gradient(low = brewer.pal(9,"Greens")[5], high = brewer.pal(9,"Greens")[9]) +
+  theme(panel.border = element_rect(fill = NA, linetype = 1, size = 1), axis.line = element_blank()) +
+  theme(legend.position = c(0.95,0.95), legend.justification = c("right", "top"), legend.title = element_text()) + scale_x_log10()
+```
+
+```{r}
+library(forestplot)
+gg <- hr[match(feature.gene, rownames(hr)),]
+gg.text <- data.frame( V1=c("Gene",rownames(gg)), V2=c("HR",round(gg$exp.coef., 2)))
+forestplot(labeltext=gg.text,
+           mean = c( NA, gg$exp.coef. ),
+           lower = c(NA, gg$lower..95 ),
+           upper = c(NA, gg$upper..95),
+           xlab="Hazard Ratio",
+           hrzl_lines=list("1" = gpar(lwd=2, col="black"), "2" = gpar(lwd=2, col="black"),"17" = gpar(lwd=2, col="black"))
+           )
+```
+
+
+###06.Validation 
+```{r}
+aml_all_wt1.clinc.v2 <- aml_all_wt1.clinc
+for (x in c(27:29,32:33,37:38,41:42,44:57,92)){
+  colnames(aml_all_wt1.clinc.v2)[x] <-  paste0(colnames(aml_all_wt1.clinc.v2)[x],".m")
+}
+
+aml_all_wt1.clinc.rm <- aml_all_wt1.clinc %>%  filter(isDNAseq == "yes")
+aml_all_wt1.clinc.rm <- aml_all_wt1.clinc.rm[! duplicated(aml_all_wt1.clinc.rm$PatientId),]
+feature_sig.list <- c("WT1","TET2","IDH1","IDH2","ageAtDiagnosis")
+#feature_sig.list <- c("WT1.m","TET2.m","IDH1.m","IDH2.m","ageAtDiagnosis")
+#gene_sig.list <- risk_gene.list
+gene_sig.list <- c(feature.gene)
+#gene_sig.list <- corr_neg
+```
+
+####BEAT
+```{r}
+sample.list <- aml_all_wt1.clinc.rm[aml_all_wt1.clinc.rm$Source.x == "BEAT" & aml_all_wt1.clinc.rm$Type == "Primary",]$SampleID
+rs.df.clinc.beat <- RiskScore_multivar_cox(sample.list, gene_sig.list, feature_sig.list, aml_all_tpm.matrix, aml_all_wt1.clinc)
+hr.cox.beat <- rs.df.clinc.beat$HR
+rs.df.clinc.beat <- rs.df.clinc.beat$Clinc
+model <- coxph( Surv(Time, Status) ~ Risk_score, data = rs.df.clinc.beat)
+summary(model)
+ggforest(model)
+fit <- survfit(Surv(Time/365, Status) ~ Risk_Group, data= rs.df.clinc.beat)
+ggsurvplot(fit,palette = c("#FF7F00","#1F78B4"),risk.table = TRUE,ncensor.plot=FALSE,pval=TRUE,conf.int = FALSE,xlab="Time in years")
+plot_survial_risk(rs.df.clinc.beat)
+plot_roc_curve(rs.df.clinc.beat)
+```
+
+
+
+####TCGA
+```{r}
+sample.list <- aml_all_wt1.clinc.rm[aml_all_wt1.clinc.rm$Source.x == "TCGA",]$SampleID
+rs.df.clinc.tcga <- RiskScore_multivar_cox(sample.list, gene_sig.list, feature_sig.list, aml_all_tpm.matrix, aml_all_wt1.clinc)
+hr.cox.tcga <- rs.df.clinc.tcga$HR
+rs.df.clinc.tcga <- rs.df.clinc.tcga$Clinc
+model <- coxph( Surv(Time, Status) ~ Risk_score, data = rs.df.clinc.tcga)
+summary(model)
+ggforest(model)
+fit <- survfit(Surv(Time/365, Status) ~ Risk_Group, data= rs.df.clinc.tcga)
+ggsurvplot(fit,palette = c("#FF7F00","#1F78B4"),risk.table = TRUE,ncensor.plot=FALSE,pval=TRUE,conf.int = FALSE,xlab="Time in years")
+plot_survial_risk(rs.df.clinc.tcga)
+plot_roc_curve(rs.df.clinc.tcga)
+```
+
+
+####TARGET
+```{r}
+sample.list <- aml_all_wt1.clinc.rm[aml_all_wt1.clinc.rm$Source.x == "TARGET",]$SampleID
+rs.df.clinc.target <- RiskScore_multivar_cox(sample.list, gene_sig.list, feature_sig.list, aml_all_tpm.matrix, aml_all_wt1.clinc)
+hr.cox.target <- rs.df.clinc.target$HR
+rs.df.clinc.target <- rs.df.clinc.target$Clinc
+rs.df.clinc.target[rs.df.clinc.target$Risk_score < -2,]$Risk_score = -2
+
+model <- coxph( Surv(Time, Status) ~ Risk_score, data = rs.df.clinc.target)
+summary(model)
+ggforest(model)
+fit <- survfit(Surv(Time/365, Status) ~ Risk_Group, data= rs.df.clinc.target)
+ggsurvplot(fit,palette = c("#FF7F00","#1F78B4"),risk.table = TRUE,ncensor.plot=FALSE,pval=TRUE,conf.int = FALSE,xlab="Time in years")
+plot_survial_risk(rs.df.clinc.target)
+plot_roc_curve(rs.df.clinc.target)
+```
+
+####ALL
+```{r}
+#sample.list <- aml_all_wt1.clinc.rm$SampleID
+sample.list <- aml_all_wt1.clinc.rm[aml_all_wt1.clinc.rm$Source.x != "TARGET" & aml_all_wt1.clinc.rm$Type == "Primary",]$SampleID
+rs.df.clinc.all <- RiskScore_multivar_cox(sample.list,gene_sig.list, feature_sig.list,aml_all_tpm.matrix, aml_all_wt1.clinc)
+hr.cox.all <- rs.df.clinc.all$HR
+rs.df.clinc.all <- rs.df.clinc.all$Clinc
+model <- coxph( Surv(Time, Status) ~ Risk_score, data = rs.df.clinc.all)
+summary(model)
+ggforest(model)
+fit <- survfit(Surv(Time/365, Status) ~ Risk_Group, data= rs.df.clinc.all)
+ggsurvplot(fit,palette = c("#FF7F00","#1F78B4"),risk.table = TRUE,ncensor.plot=FALSE,pval=TRUE,conf.int = FALSE,xlab="Time in years")
+plot_survial_risk(rs.df.clinc.all)
+plot_roc_curve(rs.df.clinc.all)
+```
+
+
+##Part V: Methylation correlation of WT1-TET2-IDH1/2 Genes
+
+###01.Target gene TPM extract
+```{r}
+col_index <- match(as.character(aml_design.mut$SampleID),colnames(aml_all_tpm.matrix))
+row_index <- match(rownames(degs.wgcna.df), rownames(aml_all_tpm.matrix))
+degs.wgcna.tpm <- aml_all_tpm.matrix[row_index,col_index]
+rownames(degs.wgcna.tpm) <- aml_all_tpm.matrix$Symbol[row_index]
+degs.wgcna.tpm <- t(degs.wgcna.tpm)
+
+WT1_status.target_gene.tpm<-aml_all_tpm.matrix[match(feature.gene,aml_all_tpm.matrix$Symbol),]
+WT1_status.target_gene.tpm.t <- t(WT1_status.target_gene.tpm)
+WT1_status.target_gene.tpm.t<-WT1_status.target_gene.tpm.t[c(1,4:nrow(WT1_status.target_gene.tpm.t)),]
+rownames(WT1_status.target_gene.tpm.t)<-gsub("\\.","-",rownames(WT1_status.target_gene.tpm.t))
+write.table(WT1_status.target_gene.tpm.t,"/mnt5/BEAT_AML_RNAseq_count/05.TPM_merge_clinical/AML_TPM_WT1.surv_target.tpm.txt",quote = FALSE, sep="\t",row.names = TRUE)
+```
+
+###02.process METH and TPM matrix of WT1-status target genes
+```{bash}
+cd  /mnt5/BEAT_AML_RNAseq_count/05.TPM_merge_clinical/
+sh work.sh
+```
+
+```{bash}
+cd /mnt5/TCGA_LAML_Methylation/04.corr_TPM_METH_of_Target_Gene/
+bash work.sh
+```
+
+```{r}
+corr_tpm.matrix <- read.table("/mnt5/TCGA_LAML_Methylation/04.corr_TPM_METH_of_Target_Gene/target.gene.TSS.3k.METH450K_probe.TPM.corr.matrix",quote = "", sep="\t", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+corr_meth.matrix <- read.table("/mnt5/TCGA_LAML_Methylation/04.corr_TPM_METH_of_Target_Gene/target.gene.TSS.3k.METH450K_probe.METH.corr.matrix", quote = "", sep="\t", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+```
+
+```{r}
+ls_df <- lapply(1:nrow(corr_tpm.matrix), function(i){
+    result.corr<-cor.test(as.numeric(corr_tpm.matrix[i,]), as.numeric(corr_meth.matrix[i,]), method = "pearson")
+    mean_meth <- mean(as.numeric(corr_meth.matrix[i,]))
+    mean_tpm <- mean(as.numeric(corr_tpm.matrix[i,]))
+    var_meth <- var(as.numeric(corr_meth.matrix[i,]))
+    var_tpm <- var(as.numeric(corr_tpm.matrix[i,]))
+    max_meth <- max(as.numeric(corr_meth.matrix[i,]))
+    min_meth <- min(as.numeric(corr_meth.matrix[i,]))
+    max_tpm <- max(as.numeric(corr_tpm.matrix[i,]))
+    min_tpm <- min(as.numeric(corr_tpm.matrix[i,]))
+    gene.prob <-  row.names(corr_tpm.matrix[i,])
+    data.frame(row.names = gene.prob, Corr=result.corr$estimate, PV=result.corr$p.value,
+               Mean_Meth = mean_meth, Var_Meth = var_meth,
+               Max_meth  = max_meth,  Min_Meth = min_meth, 
+               Mean_TPM  = mean_tpm,  Var_TPM  = var_tpm,
+               Max_TPM   = max_tpm,   Min_TPM  = min_tpm)
+})
+
+corr <- do.call(rbind, ls_df)
+rm(ls_df)
+
+gene.prob.df <- as.data.frame(strsplit(row.names(corr),","),stringsAsFactors=FALSE)
+corr$Gene <- as.character(gene.prob.df[1,])
+corr$Prob <- as.character(gene.prob.df[2,])
+
+#a<-corr[corr$PV < 0.05 & corr$Corr < 0,]$Gene
+#a[! duplicated(a)]
+corr_neg<-unique(corr[corr$PV < 0.05 & corr$Corr < 0,]$Gene)
+corr_pos<-unique(corr[corr$PV < 0.05 & corr$Corr > 0,]$Gene)
+corr_sig <- unique(corr[corr$PV < 0.05,]$Gene)
+```
+
+
+###03.Meth prob  corr plot of WT1-TET2-IDH1/2 survial-related deg
+```{r}
+#gg <- corr
+#gg <- corr[corr$Gene %in%  rownames(hr.lasso),]
+#gg <- corr[corr$Gene %in%  corr_sig,]
+gg <- corr[corr$Gene %in%  corr_neg,]
+gg[gg$PV < 0.001,]$PV = 0.001
+
+
+ggplot(gg,aes(y=reorder(Gene,Corr),x=Corr,color=-log10(PV))) + geom_boxplot() + geom_jitter() + blank + geom_vline(xintercept = 0, linetype= 2)+ scale_colour_gradient(low = brewer.pal(9,"BuPu")[4], high = brewer.pal(9,"BuPu")[9])+ theme(panel.border = element_rect(linetype = 1, size = 1, fill = NA), axis.line = element_blank())
+
+ggplot(gg,aes(y=reorder(Prob,Corr),x=Corr,color=-log10(PV), fill=-log10(PV))) + 
+  geom_point(shape = 21) + 
+  facet_wrap(~ Gene, scales="free",ncol=4) + 
+  blank + 
+  geom_vline(xintercept = 0, linetype= 2) + 
+  theme(axis.text.y = element_blank(), axis.ticks.y=element_blank()) + 
+  scale_colour_gradient(name = "-log10(Pvalue)",low = brewer.pal(9,"BuPu")[4], high = brewer.pal(9,"BuPu")[9]) +
+  scale_fill_gradient(name = "-log10(Pvalue)",low = brewer.pal(9,"BuPu")[4], high = brewer.pal(9,"BuPu")[9])  +
+  ylab("Probes located in the promoter region of each gene") +
+  xlab("Pearson's correlation coefficient")
+#  theme(legend.position = c(1,0.00), legend.justification = c("right","bottom"), legend.background = element_rect(fill = NA))
+```
+
+###04.Volcano plot of WT1-TET2-IDH1/2 survial-related deg
+```{r}
+AML_NM.deg.list <- c(AML_NM.deg$up$Symbol,AML_NM.deg$down$Symbol,feature.gene)
+#hr.vol.plot <- volcano_plot_Deseq2(WT1_MUT.deg$result,WT1_MUT.deg$result$Symbol,feature.gene)
+hr.vol.plot <- volcano_plot_Deseq2(WT1_MUT.deg$result,AML_NM.deg.list,feature.gene)
+hr.vol.plot + ylim(0, 15) + xlim(-4,4)
+```
+
+###05. Boxplot of WT1-TET2-IDH1/2 sig deg
+```{r}
+boxplot.list.beat <- lapply(gene_sig.list, function(x){
+  expression_boxplot_byMut(x, rs.df.clinc.beat, aml_all_tpm.matrix.nm)
+})
+plot_grid(plotlist = boxplot.list.beat, nrow = 2)
+
+boxplot.list.tcga <- lapply(gene_sig.list, function(x){
+  expression_boxplot_byMut(x, rs.df.clinc.tcga, aml_all_tpm.matrix.nm)
+})
+plot_grid(plotlist = boxplot.list.tcga, nrow = 2)
+
+boxplot.list.target <- lapply(gene_sig.list, function(x){
+  expression_boxplot_byMut(x, rs.df.clinc.target, aml_all_tpm.matrix.nm)
+})
+plot_grid(plotlist = boxplot.list.target, nrow = 2)
+
+boxplot.list.all <- lapply(gene_sig.list, function(x){
+  expression_boxplot_byMut(x, rs.df.clinc.all, aml_all_tpm.matrix.nm)
+})
+plot_grid(plotlist = boxplot.list.all, nrow = 2)
+```
+
+##Part VI: Cibersort
+```{r}
+rs.df.clinc.beat.tpm <- aml_all_tpm.matrix[aml_all_tpm.matrix$Type == "protein_coding",c(1,match(rs.df.clinc.beat$Sample,colnames(aml_all_tpm.matrix)))]
+rs.df.clinc.beat.tpm <- rs.df.clinc.beat.tpm[! duplicated(rs.df.clinc.beat.tpm$Symbol) ,]
+write.table(rs.df.clinc.beat.tpm, "/data/liuyabin/lyb_proj_20200717/rs.df.clinc.beat.tpm.txt", row.names = FALSE, quote = FALSE, sep = "\t")
+```
+
+
+```{r}
+#save.image(file="/data/liuyabin/lyb_proj_20200717/WT1_mut_pg.RData")
+#load("/data/liuyabin/lyb_proj_20200717/WT1_mut_pg.RData")
+```

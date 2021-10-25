@@ -1,0 +1,601 @@
+---
+title: "AML_all_clinc"
+author: "Yabin Liu"
+date: "2020/8/25"
+output: html_document
+---
+
+##01.AML WT1 mutation distribution
+
+```{r}
+source("~/Desktop/Wang_Lab/rmd_script/lyb_function.R")
+```
+
+
+```{r}
+aml_combind.clinc <- read.table("/Users/liuyabin/Desktop/WT1_report/AML_TCGA_TARGET_BEAT/AML_clinical_WT1/Clinical_process/AML_combind_clinical.process.txt", header = TRUE, sep = "\t", stringsAsFactors = FALSE)
+aml_combind.clinc <- aml_combind.clinc[! duplicated(aml_combind.clinc$PatientId),]
+aml_combind.clinc[aml_combind.clinc$WT1 == 1,]$WT1 = "Mut" 
+aml_combind.clinc[aml_combind.clinc$WT1 == 0,]$WT1 = "WT"
+aml_combind.clinc$WT1 = factor(aml_combind.clinc$WT1,levels = c("WT","Mut"))
+aml_combind.clinc$NEJM_2016 = factor(aml_combind.clinc$NEJM_2016,levels = c("NPM1","CEBPA_bi","inv16","t15_17","t8_21","t6_9","inv3","t_MLL","chromatin_spliceosome","p53_aneuploidy","IDH2_p172","Ambiguous_classification","No_class"))
+```
+
+
+###Bar plot of WT1 mutation based on NEJM_2016
+```{r}
+library(ggplot2)
+library(dplyr)
+#a<-aml_combind.clinc %>% group_by(WT1,NEJM_2016) %>% summarise(Num=n())
+
+
+p1<-ggplot(aml_combind.clinc, aes(x = NEJM_2016, fill=WT1)) + geom_bar(position='stack',stat="count") + xlab("") + ylab("Number of samples") + ggtitle("Distrabution of WT1 mutations based on Genomic classification") + scale_fill_manual(values=c("#80B1D3","#FB8072"))  +  geom_text(aes(label=..count..),stat="count",position=position_stack(vjust = 1), color="black",size=4) +theme(legend.position = "top")  +blank + theme(axis.text.x = element_text(angle=10,hjust = 1,vjust = 1))
+p1
+
+ggplot(aml_combind.clinc, aes(x = NEJM_2016, fill=as.factor(WT1))) + geom_bar(position='fill',stat="count") + xlab("") + ylab("Number of samples") + ggtitle("Distrabution of WT1 mutations based on FAB classification") + scale_fill_manual(values=c("grey90","#FB8072"))  + geom_text(aes(label=..count..),stat="count",position=position_fill(), color="black",size=4) +blank
+
+```
+
+
+
+```{r}
+library(RColorBrewer)
+aml_Genomic_wt1_stat <- aml_combind.clinc %>% group_by(NEJM_2016,WT1) %>% summarize(num=n())
+prop.table(table(aml_combind.clinc$NEJM_2016,aml_combind.clinc$WT1))
+
+tf1<-merge(aml_Genomic_wt1_stat[aml_Genomic_wt1_stat$WT1=="Mut",c(1,3)],aml_Genomic_wt1_stat[aml_Genomic_wt1_stat$WT1=="WT",c(1,3)],by.x=1,by.y=1,all=TRUE)
+tf1[is.na(tf1)] = 0
+
+p2<-ggplot(tf1, aes(x = NEJM_2016,y=num.x/(num.x+num.y))) + geom_bar(stat = "identity",fill=brewer.pal(8,"Paired")[2],show.legend = TRUE)  + geom_text(aes(label = round(num.x/(num.x+num.y),3)), size=3, position=position_stack(vjust = 0.5), color="white") + ggtitle("Percentage of WT1 mutations based on Genomic classification") + ylab("Percentage") + xlab("") + blank + theme(axis.text.x = element_text(angle=10,hjust = 1,vjust = 1))
+p2
+```
+
+###Bar plot of WT1 mutation based on Source
+```{r}
+library(forcats)
+aml_source_wt1_stat <- read.table("/Users/liuyabin/Desktop/WT1_report/AML_TCGA_TARGET_BEAT/WT1_mutation/All_AML_WT1_mutation.stats", header = TRUE, sep = "\t", stringsAsFactors = FALSE)
+
+aml_source_wt1_stat$Source<-fct_reorder(aml_source_wt1_stat$Source,-aml_source_wt1_stat$Sample_num)
+aml_source_wt1_stat<-aml_source_wt1_stat[!aml_source_wt1_stat$Source == "CCLE",]
+
+
+p3<-ggplot(aml_source_wt1_stat, aes(x = Source,y=Sample_num)) + geom_bar(stat = "identity",aes(fill=Source),show.legend = FALSE)  + geom_text(aes(label = Sample_num), size=3, position=position_stack(vjust = 0.5), color="black") + ggtitle("Distrabution of WT1 mutations in different database") + ylab("Number of samples") + xlab("") + blank+ theme(axis.text.x = element_text(angle=30,hjust = 1,vjust = 1)) + scale_fill_manual(values = brewer.pal(8,"Set2"))
+p3
+
+p4<-ggplot(aml_source_wt1_stat, aes(x = Source,y=WT1_sample/Sample_num)) + geom_bar(stat = "identity",aes(fill=Source),show.legend = FALSE)  + geom_text(aes(label = round(WT1_sample/Sample_num,3)), size=3, position=position_stack(vjust = 0.5), color="black") + ggtitle("Percentage of WT1 mutations in different database") + ylab("Percentage") + xlab("") + blank+ theme(axis.text.x = element_text(angle=30,hjust = 1,vjust = 1)) + scale_fill_manual(values = brewer.pal(8,"Set2"))
+p4
+```
+
+###Layout display  
+```{r}
+library(cowplot)
+#pdf("~/Desktop/a1.pdf",height = 10, width = 6)
+plot_grid(p1,p3,p2,p4, nrow=2, align = "v", rel_widths = c(13,8,13,8), labels=c("A","C","B","D"))
+#dev.off()
+
+#library("devtools")
+#install_github("zzawadz/customLayout")
+library(customLayout)
+lay1 <- lay_new(1)
+lay2 <- lay_new(matrix(1:2, nc = 2))
+lay3 <- lay_bind_row(lay1,lay2,heights = c(2, 1), addmax = TRUE)
+
+#lay2 <- lay_new(  matrix(1:4, nc = 2), widths = c(1, 1),heights = c(1,1))
+lay_show(lay3)
+nn <- list()
+nn[[1]] <- p1
+#nn[[2]] <- p2
+nn[[2]] <- p3
+nn[[3]] <- p4
+lay_grid(nn,lay3)
+```
+
+###AML prognosis based on ELN2017 Myclass
+```{r}
+aml_clinic <- aml_combind.clinc %>% filter(vitalStatus != "Unknown")
+# & Source != "TARGET"
+aml_clinic$Status <- 0
+aml_clinic[aml_clinic$vitalStatus == "Death",]$Status <- 1
+
+aml_clinic %>% group_by(Status) %>% summarise(n()) 
+
+pretty_aml <- aml_clinic %>%
+  transmute(time=as.numeric(overallSurvival),
+            status=Status,
+            PatientID = PatientId,
+            Age = as.numeric(ageAtDiagnosis),
+            Sex = factor(Sex),
+            WT1 = factor(WT1),
+            FLT3_ITD = factor(FLT3_ITD),
+            CEBPA_bi = factor(CEBPA_bi),
+            NPM1 = factor(NPM1),
+            DNMT3A = factor(DNMT3A),
+            Cohort = factor(Source),
+            NEJM2016 = factor(NEJM_2016),
+            ELN2017 = factor(ELN2017_Myclass)
+            )
+model <- coxph( Surv(time, status) ~ Sex + Age + WT1 + FLT3_ITD + ELN2017+ NEJM2016, data = pretty_aml)
+ggforest(model)
+fit <- survfit(Surv(time/365, status) ~DNMT3A+FLT3_ITD+NPM1, data= pretty_aml)
+ggsurvplot(fit,palette = brewer.pal(8,"Paired"),risk.table = TRUE,ncensor.plot=FALSE,pval=TRUE,conf.int = FALSE,xlab="Time in years")
+#ggsurvplot_facet(fit,pretty_aml,facet.by="ELN2017", palette = c("#FB8072","#80B1D3"),risk.table = TRUE,ncensor.plot=TRUE,pval=TRUE,conf.int = FALSE,xlab="Time in years")
+
+fit <- survfit(Surv(time/365, status) ~ELN2017, data= pretty_aml)
+ggsurvplot(fit,palette = c("#FB8072","#80B1D3","Black"),risk.table = TRUE,ncensor.plot=FALSE,pval=TRUE,conf.int = FALSE,xlab="Time in years")
+ggsurvplot_facet(fit,pretty_aml,facet.by="WT1", palette = c("#FB8072","#80B1D3","Black"),risk.table = TRUE,ncensor.plot=TRUE,pval=TRUE,conf.int = FALSE,xlab="Time in years",ncol=1)
+```
+
+```{r}
+pretty_aml.upd <- pretty_aml %>%  filter(Cohort %in% c("BEAT") &  WT1=="Mut")
+upd.list <- c("1281","191", "1730")
+pretty_aml.upd$UPD <- "FALSE"
+pretty_aml.upd[pretty_aml.upd$PatientID %in% upd.list,]$UPD <- "TRUE"
+fit <- survfit(Surv(time/365, status) ~ UPD, data= pretty_aml.upd)
+ggsurvplot(fit,palette = c("#FB8072","#80B1D3"),risk.table = TRUE,ncensor.plot=FALSE,pval=TRUE,conf.int = FALSE,xlab="Time in years")
+```
+
+```{r}
+aml_combind.clinc <- read.table("/Users/liuyabin/Desktop/WT1_report/AML_TCGA_TARGET_BEAT/AML_clinical_WT1/Clinical_process/AML_combind_clinical.process.txt", header = TRUE, sep = "\t", stringsAsFactors = FALSE)
+aml_combind.clinc <- aml_combind.clinc[! duplicated(aml_combind.clinc$PatientId),]
+a<-aml_combind.clinc %>% group_by(Source,ELN2017_Myclass) %>% summarise(NUM=n())
+ggplot(a,aes(x=Source,y=NUM)) + geom_bar(stat = "identity",aes(fill=ELN2017_Myclass),show.legend = FALSE)
+```
+
+##02.Display of WT1 mutation in AML 
+```{r}
+#library(trackViewer)
+wt1_exon_len <- read.table("/Users/liuyabin/Desktop/WT1_report/AML_TCGA_TARGET_BEAT/WT1_mutation/WT1_exon_length.NM_024426.6.txt",stringsAsFactors = FALSE, header = TRUE, sep = "\t")
+wt1_mut_maf <- read.table("/Users/liuyabin/Desktop/WT1_report/AML_TCGA_TARGET_BEAT/WT1_mutation/All_AML_WT1_mutation.hg38.process.maf", stringsAsFactors = FALSE, header = TRUE, sep = "\t")
+wt1_mut_maf<-wt1_mut_maf[wt1_mut_maf$Center=="TCGA",]
+sample.gr <- GRanges("WT1", IRanges(wt1_mut_maf$ProteinPos, width=1, names=wt1_mut_maf$MutationID),Type=wt1_mut_maf$Variant_Classification)
+```
+```{r}
+features <- GRanges("WT1", IRanges(wt1_exon_len$Protein_START, 
+                                    width=wt1_exon_len$Protein_LENGTH,
+                                    names=wt1_exon_len$ID))
+x1<-"WT1:74-394"
+x2<-"WT1:396-420"
+x3<-"WT1:426-450"
+x4<-"WT1:456-478"
+x5<-"WT1:487-511"
+domain<-GRanges(c(x1,x2,x3,x4,x5))
+names(domain) <- c("WT1",rep("Zinc Finger",4))
+features<-GRanges(c(domain,features))
+#features$featureLayerID <- c(rep("tx_1",10),rep("tx_2",2))
+features$fill <- c("#A6CEE3",rep("#1F78B4",4),rep(NA,10))
+features$color <- c(rep(NA,5),rep("black",10))
+#features$color= "blue"
+```
+```{r}
+#library(trackViewer)
+sample.gr$fill = "blue"
+sample.gr$border = "grey70"
+sample.gr$alpha = 0.6
+sample.gr$label = as.character(1:length(sample.gr))
+
+lolliplot(sample.gr, features, xaxis = c(wt1_exon_len$Protein_START,522))
+lolliplot(sample.gr, features, ranges = GRanges("WT1", IRanges(350, 500)))
+```
+
+```{r}
+df <-wt1_mut_maf %>% group_by(MutationID,ProteinPos,Exon_Number,Variant_Classification) %>% summarise(score=n())
+sample.gr <- GRanges("WT1", IRanges(df$ProteinPos, width=1, names=df$MutationID),score=df$score,cex=df$score*(1/max(df$score)) + 0.5)
+sample.gr$SNPsideID <- sample(c("top", "bottom"), length(sample.gr),replace=TRUE)
+
+#pdf("~/Desktop/aa.pdf",height = 10, width = 30)
+lolliplot(sample.gr, features, xaxis = c(start(features),522), yaxis = FALSE)
+#dev.off()
+```
+
+###lolliplot of WT1 mutation 
+```{r}
+df.lolliplot <- read.table("/Users/liuyabin/Desktop/WT1_report/AML_TCGA_TARGET_BEAT/WT1_mutation/All_AML_WT1_mutation.hg38.process.lolliplot", stringsAsFactors = FALSE, header = TRUE, sep = "\t")
+sample.gr <- GRanges("WT1", IRanges(df.lolliplot$Pos, width=1, names=df.lolliplot$ID),score=df.lolliplot$Num_Total/8)
+sample.gr$SNPsideID <- sample(c("top", "bottom"), length(sample.gr),replace=TRUE)
+sample.gr$label.parameter.rot <- 60
+mygp <- df.lolliplot$Num_Total
+mygp<-lapply(1:length(sample.gr),function(x){
+  if(df.lolliplot$Num_Total[x] >= 5){mylist = gpar(col="#984EA3")}else{mylist = gpar(col="grey30")}
+  return(mylist)
+})
+sample.gr$label.parameter.gp <- mygp
+
+mylabel = df.lolliplot$Num_Total
+mylabel[mylabel==1] <- NA
+sample.gr$label = as.character(mylabel)
+
+features$height = 0.03
+sample.gr$color = "#FC8D62"
+sample.gr$border = "#FC8D62"
+sample.gr$label.col = "white"
+
+mycex = df.lolliplot$Num_Total*(1/max(df.lolliplot$Num_Total)) + 1.1
+mycex[mycex==min(mycex)] <- 0.8
+sample.gr$cex = mycex
+
+
+pdf("~/Desktop/aa.pdf",height = 10, width = 20)
+lolliplot(sample.gr, features, xaxis = c(start(features),522),  yaxis = FALSE)
+dev.off()
+```
+
+###Pieplot of WT1 mutaion
+```{r}
+library(ggpubr)
+wt1_mut_maf <- read.table("/Users/liuyabin/Desktop/WT1_report/AML_TCGA_TARGET_BEAT/WT1_mutation/All_AML_WT1_mutation.hg38.process.maf", stringsAsFactors = FALSE, header = TRUE, sep = "\t")
+df.pie <- data.frame(TypeI=wt1_mut_maf$Variant_Classification,TypeII=rep(NA,nrow(wt1_mut_maf)))
+
+df.pie[df.pie$TypeI=="Frame_Shift_Del",]$TypeII = "Deletion"
+df.pie[df.pie$TypeI=="Frame_Shift_Ins",]$TypeII = "Insertion"
+df.pie[df.pie$TypeI=="In_Frame_Del",]$TypeII = "Deletion"
+df.pie[df.pie$TypeI=="Missense_Mutation",]$TypeII = "Missense"
+df.pie[df.pie$TypeI=="Nonsense_Mutation",]$TypeII = "Nonsense"
+df.pie[df.pie$TypeI=="Splice_Site",]$TypeII = "Splice"
+df.pie <- df.pie %>% group_by(TypeII) %>% summarise(Num=n(),Pro=round(n()/nrow(df.pie)*100,1))
+#df.pie$labs <- paste0(df.pie$TypeII, " (", df.pie$Pro, "%)")
+df.pie$labs <- paste(df.pie$Pro, "%")
+#library(forcats)
+df.pie$TypeII <-  fct_reorder(df.pie$TypeII, -df.pie$Num)
+#pdf("~/Desktop/a2.pdf",height = 5, width = 6)
+ggpie(df.pie, "Num", label = "labs",fill = "TypeII",color = "white",lab.pos = "in", lab.font = c("black","blod",5)) + theme(legend.position = "right")  + scale_fill_manual(values = brewer.pal(12,"Paired")[c(1,2,7,8,9)])
+#dev.off()
+```
+
+###ovarall survial of different WT1 mutation Type
+```{r}
+wt1_mut_maf <- read.table("/Users/liuyabin/Desktop/WT1_report/AML_TCGA_TARGET_BEAT/WT1_mutation/All_AML_WT1_mutation.hg38.process.maf", stringsAsFactors = FALSE, header = TRUE, sep = "\t")
+aml_combind.clinc <- read.table("/Users/liuyabin/Desktop/WT1_report/AML_TCGA_TARGET_BEAT/AML_clinical_WT1/NEJM_2016_classification/AML_combind_clinical.txt", header = TRUE, sep = "\t", stringsAsFactors = FALSE)
+```
+
+```{r}
+df.wt1.os<-aml_combind.clinc[unique(na.omit(match(wt1_mut_maf$Tumor_Sample_Barcode,aml_combind.clinc$PatientId))),]
+df.wt1.os<-df.wt1.os[! df.wt1.os$WT1 ==0,]
+df.wt1.os <- data.frame(SampleID=df.wt1.os$PatientId,overallSurvival=df.wt1.os$overallSurvival,vitalStatus=df.wt1.os$vitalStatus)
+wt1_mut_maf$Type <- "N"
+wt1_mut_maf[wt1_mut_maf$ProteinPos >= 372,]$Type <- "C"
+df.wt1.type <- data.frame(SampleID=wt1_mut_maf$Tumor_Sample_Barcode,Type=wt1_mut_maf$Type)
+df.wt1.os<-unique(merge(df.wt1.os,df.wt1.type, by.x = 1, by.y = 1, all = FALSE))
+df.wt1.os[df.wt1.os$SampleID %in% df.wt1.os[duplicated(df.wt1.os$SampleID),]$SampleID,]$Type <- "C"
+df.wt1.os <- unique(df.wt1.os)
+
+df.wt1.os <- df.wt1.os %>% filter(vitalStatus != "Unknown")
+df.wt1.os$Status <- 0
+df.wt1.os[df.wt1.os$vitalStatus == "Death",]$Status <- 1
+df.wt1.os$Time <- as.numeric(df.wt1.os$overallSurvival)
+
+model <- coxph( Surv(Time, Status) ~ Type, data = df.wt1.os)
+ggforest(model)
+fit <- survfit(Surv(Time/365, Status) ~Type, data= df.wt1.os)
+ggsurvplot(fit,palette = c("#FB8072","#80B1D3"),risk.table = TRUE,ncensor.plot=TRUE,pval=TRUE,conf.int = TRUE,xlab="Time in years")
+```
+
+##03.oncoPrint of WT1 mutation
+```{r}
+aml_combind.clinc <- read.table("/Users/liuyabin/Desktop/WT1_report/AML_TCGA_TARGET_BEAT/AML_clinical_WT1/NEJM_2016_classification/AML_combind_clinical.txt", header = TRUE, sep = "\t", stringsAsFactors = FALSE)
+aml_combind.clinc <- aml_combind.clinc[! duplicated(aml_combind.clinc$PatientId),]
+aml_combind.clinc <- data.table::as.data.table(aml_combind.clinc)
+aml_combind.clinc[,`:=`(IDH2,IDH2_p140 + IDH2_p172)]
+```
+
+###ComplexHeatmap display WT1 and methylation Genes
+```{r}
+#features.list <- c("WT1","ASXL1","TET2","IDH1","IDH2_p140","EZH2","IDH2_p172")
+features.list <- c("RUNX1","t8_21","t15_17","t6_9","inv3","t_MLL","inv16")
+#features.list <- c("TET2", "IDH1", "IDH2", "WT1")
+#df.oncoplot <- aml_combind.clinc[,match(features.list,colnames(aml_combind.clinc))]
+df.oncoplot <- aml_combind.clinc[,features.list,with = FALSE]
+df.oncoplot<-as.data.frame(df.oncoplot)
+row.names(df.oncoplot) <- aml_combind.clinc$PatientId
+nrow(df.oncoplot[rowSums(df.oncoplot)>0,])
+df.oncoplot <- t(df.oncoplot)
+df.oncoplot[df.oncoplot == 1] <- "ONCO"
+df.oncoplot[df.oncoplot == 0] <- ""
+features.df <-as.data.frame(rowSums(df.oncoplot=="ONCO"))
+colnames(features.df) <- "Num" 
+features.df$Features <- rownames(features.df)
+features.df<-features.df %>% arrange(-Num)
+col = c( "ONCO" = "#1F78B4")
+```
+```{r}
+alter_fun = list(
+    background = alter_graphic("rect", width=0.9,height=0.9,fill = "#CCCCCC"),   
+    "ONCO" = alter_graphic("rect",  width = 0.9, height = 0.9,fill = col["ONCO"])
+)
+pdf("~/Desktop/a3.pdf",height = 3, width = 8)
+oncoPrint(df.oncoplot,alter_fun = alter_fun, col = col,row_order = features.df$Features,remove_empty_columns=TRUE,top_annotation=NULL,show_heatmap_legend = FALSE)
+
+dev.off()
+```
+
+
+###ComplexHeatmap display NEJM_2016 Classify envents
+```{r}
+aml_combind.clinc1 <- aml_combind.clinc[aml_combind.clinc$WT1==1,]
+aml_combind.clinc2 <- aml_combind.clinc[aml_combind.clinc$WT1==0,]
+```
+
+```{r}
+#library(ComplexHeatmap)
+df.oncoplot <-  aml_combind.clinc1[,c(11:48,60,50)]
+row.names(df.oncoplot) <- aml_combind.clinc1$PatientId
+df.oncoplot <- t(df.oncoplot)
+#row.names(df.oncoplot) <- gsub(".1","",rownames(df.oncoplot))
+```
+
+```{r}
+df.oncoplot[df.oncoplot == 1] <- "ONCO"
+df.oncoplot[df.oncoplot == 0] <- ""
+features.list <-as.data.frame(rowSums(df.oncoplot=="ONCO"))
+colnames(features.list) <- "Num" 
+features.list$Features <- rownames(features.list)
+features.list<-features.list %>% arrange(-Num)
+col = c( "ONCO" = "blue")
+
+alter_fun = list(
+    background = alter_graphic("rect", width=0.9,height=0.9,fill = "#CCCCCC"),   
+    "ONCO" = alter_graphic("rect",  width = 0.8, height = 0.8,fill = col["ONCO"])
+)
+#pdf("~/Desktop/aa.pdf",height = 6, width = 6)
+oncoPrint(df.oncoplot,alter_fun = alter_fun, col = col)
+
+#dev.off()
+```
+```{r}
+df.oncoplot <-  aml_combind.clinc2[,c(11:48,60,50)]
+row.names(df.oncoplot) <- aml_combind.clinc2$PatientId
+df.oncoplot <- t(df.oncoplot)
+df.oncoplot[df.oncoplot == 1] <- "ONCO"
+df.oncoplot[df.oncoplot == 0] <- ""
+col = c( "ONCO" = "blue")
+
+alter_fun = list(
+    background = function(x, y, w, h) {
+        grid.rect(x-unit(0.000002, "pt"), y-unit(0.000002, "pt"), w-unit(0.0000010, "pt"), h-unit(0.0000010, "pt"), 
+            gp = gpar(fill = "#CCCCCC", col = NA))
+    },
+    # big blue
+    ONCO = function(x, y, w, h) {
+        grid.rect(x-unit(0.000002, "pt"), y-unit(0.000002, "pt"), w-unit(0.0000010, "pt"), h-unit(0.0000010, "pt"), 
+            gp = gpar(fill = col["ONCO"], col = NA))
+    }
+)
+
+
+pdf("~/Desktop/bb.pdf",height = 6, width = 12)
+oncoPrint(df.oncoplot,alter_fun = alter_fun, col = col,row_order = features.list$Features)
+
+dev.off()
+```
+
+
+##04.WT1 RNAseq FPKM boxplot
+###Boxplot of WT1 in AML
+```{r}
+wt1_tpm <- read.table("/Users/liuyabin/Desktop/WT1_report/AML_TCGA_TARGET_BEAT/WT1_RNAseq/AML_WT1_TPM_norm.txt",header = TRUE,sep="\t")
+colnames(wt1_tpm) <- c("Sample", "Source", "TPM", "TPM_norm")
+
+wt1_tpm$Source <- factor(wt1_tpm$Source, levels=c("BEAT","TARGET","TCGA","CD2017","CD34","MNC"))
+
+pdf("~/Desktop/a4.pdf",height = 5, width = 4)
+ggplot(wt1_tpm,aes(x=Source,y=log2(TPM+0.01))) + geom_boxplot(aes(color=Source),outlier.shape = NA,show.legend = FALSE) + geom_jitter(aes(color=Source),size=0.5, show.legend = FALSE) + blank + xlab("") + scale_color_manual(values =c( brewer.pal(4,"Paired"),"grey50","black"))
+dev.off()
+
+ggplot(wt1_tpm,aes(x=Source,y=log2(TPM_norm+0.01))) + geom_boxplot(aes(color=Source),outlier.shape = NA) + geom_jitter(aes(color=Source),size=0.5) + blank + xlab("") + scale_color_manual(values =c( brewer.pal(4,"Paired"),"grey50","black"))
+
+```
+
+###Boxplot of WT1 in CCLE and GTEx
+```{r}
+wt1_getx_tpm <- read.table("/Users/liuyabin/Desktop/WT1_report/AML_TCGA_TARGET_BEAT/WT1_RNAseq/GETx_WT1_TPM.anno.txt",header = TRUE,sep="\t")
+wt1_ccle_fpkm <- read.table("/Users/liuyabin/Desktop/WT1_report/AML_TCGA_TARGET_BEAT/WT1_RNAseq/CCLE_WT1_RPKM.anno.txt",header = TRUE,sep="\t")
+
+pdf("~/Desktop/a4.pdf",height = 5, width = 14)
+x1<-ggplot(wt1_getx_tpm,aes(x=fct_reorder(SMTS,-TPM),y=log2(TPM))) + geom_boxplot(color="#1F78B4",outlier.shape = NA,show.legend = FALSE)  + blank + xlab("") + coord_flip()  + ggtitle("GTEx DB")
+#+ geom_jitter(aes(color=SMTS),size=0.5,show.legend = FALSE)
+wt1_ccle_fpkm<-wt1_ccle_fpkm[! is.na(wt1_ccle_fpkm$Site_Primary),]
+x2<-ggplot(wt1_ccle_fpkm,aes(x=fct_reorder(Site_Primary,-log2(RPKM)),y=log2(RPKM))) + geom_boxplot(color="#1F78B4",outlier.shape = NA,show.legend = FALSE)  + blank + xlab("") + coord_flip() + ggtitle("CCLE DB")
+
+plot_grid(x1,x2, nrow=1, align = "v", labels=c("A","B"))
+dev.off()
+```
+
+
+##05. NPM1 & DNMT3A & FLT3_ITD mutation in AML
+
+###clinic data input 
+```{r}
+aml_combind.clinc <- read.table("/Users/liuyabin/Desktop/WT1_report/AML_TCGA_TARGET_BEAT/AML_clinical_WT1/Clinical_process/AML_combind_clinical.process.txt", header = TRUE, sep = "\t", stringsAsFactors = FALSE)
+aml_combind.clinc <- aml_combind.clinc[! duplicated(aml_combind.clinc$PatientId),]
+aml_combind.clinc<-data.table::as.data.table(aml_combind.clinc)
+sum(aml_combind.clinc$IDH2_p140 + aml_combind.clinc$IDH2_p172)
+aml_combind.clinc[,`:=`(IDH2, IDH2_p140 + IDH2_p172)]
+```
+
+### stat of NPM1 & DNMT3A & FLT3_ITD mutation in AML
+```{r}
+as.data.frame(table(apply(X = aml_combind.clinc[, c("FLT3_ITD", "NPM1", "DNMT3A"), drop = FALSE], 1, paste, collapse = "")))
+as.data.frame(table(apply(X = aml_combind.clinc[, c("WT1","FLT3_ITD", "NPM1", "DNMT3A"), drop = FALSE], 1, paste, collapse = "")))
+```
+
+###AML prognosis based on NPM1 & DNMT3A & FLT3_ITD mutation
+```{r}
+library(survival)
+library(survminer)
+library("dplyr")
+#aml_clinic <- aml_combind.clinc %>% filter(vitalStatus != "Unknown"  & normal==1)
+#& Source != "TARGET"
+aml_clinic <- aml_combind.clinc %>% filter(vitalStatus != "Unknown"  & Source != "TARGET" & isDNAseq == "yes" & normal == 1)
+aml_clinic$Status <- 0
+aml_clinic[aml_clinic$vitalStatus == "Death",]$Status <- 1
+aml_clinic %>% group_by(Status) %>% summarise(n()) 
+pretty_aml <- aml_clinic %>%
+  transmute(time=as.numeric(overallSurvival),
+            status=Status,
+            Age = as.numeric(ageAtDiagnosis),
+            Sex = factor(Sex),
+            WT1 = WT1,
+            FLT3_ITD = FLT3_ITD,
+            CEBPA_bi = CEBPA_bi,
+            NPM1 = NPM1,
+            TET2 = TET2,
+            IDH2 = IDH2,
+            IDH1 = IDH1,
+            DNMT3A = DNMT3A,
+            Cohort = Source,
+            NEJM2016 = factor(NEJM_2016),
+            ELN2017 = factor(ELN2017_Myclass)
+            )
+model <- coxph( Surv(time, status) ~ Sex + Age + WT1 + FLT3_ITD + NPM1+ DNMT3A + TET2 + IDH2 + IDH1, data = pretty_aml)
+ggforest(model)
+fit <- survfit(Surv(time/365, status) ~DNMT3A+FLT3_ITD+NPM1, data= pretty_aml)
+ggsurvplot(fit,palette = brewer.pal(8,"Paired"),risk.table = TRUE,ncensor.plot=FALSE,pval=TRUE,conf.int = FALSE,xlab="Time in years")
+#ggsurvplot_facet(fit,pretty_aml,facet.by="ELN2017", palette = c("#FB8072","#80B1D3"),risk.table = TRUE,ncensor.plot=TRUE,pval=TRUE,conf.int = FALSE,xlab="Time in years")
+```
+
+###ComplexHeatmap display NPM1 & DNMT3A & FLT3_ITD mutation
+```{r}
+features.list <- c("NPM1","DNMT3A","FLT3_ITD","complex","inv16","inv3","t15_17","t6_9","t8_21","t9_11","t_v_11","abn_3",colnames(aml_combind.clinc)[51:65])
+features.list<- colnames(aml_combind.clinc)[c(11:65,82)]
+index <- match(features.list,colnames(aml_combind.clinc))
+aml_combind.clinc <- as.data.frame(aml_combind.clinc)
+df.oncoplot <- aml_combind.clinc[,index]
+row.names(df.oncoplot) <- aml_combind.clinc$PatientId
+df.oncoplot <- df.oncoplot %>% filter(NPM1==1 & DNMT3A==1 & FLT3_ITD==1)
+df.oncoplot <- t(df.oncoplot)
+df.oncoplot[df.oncoplot == 1] <- "ONCO"
+df.oncoplot[df.oncoplot == 0] <- ""
+features.df <-as.data.frame(rowSums(df.oncoplot=="ONCO"))
+colnames(features.df) <- "Num" 
+features.df$Features <- rownames(features.df)
+features.df<-features.df %>% arrange(-Num)
+col = c( "ONCO" = "#1F78B4")
+```
+```{r}
+library(ComplexHeatmap)
+alter_fun = list(
+    background = alter_graphic("rect", width=0.9,height=0.9,fill = "#CCCCCC"),   
+    "ONCO" = alter_graphic("rect",  width = 0.9, height = 0.9,fill = col["ONCO"])
+)
+#pdf("~/Desktop/a3.pdf",height = 4, width = 6)
+oncoPrint(df.oncoplot,alter_fun = alter_fun, col = col,row_order = features.df$Features,remove_empty_columns=TRUE,top_annotation=NULL,show_heatmap_legend = FALSE)
+
+#dev.off()
+```
+
+##06.exclusive/co-occurance event analysis
+
+###data extract from clinc matrix 
+```{r}
+#mutMat<-aml_combind.clinc[aml_combind.clinc$normal == 1,18:48]
+#aml_combind.clinc$Source != "TARGET" & 
+#mutMat<-aml_combind.clinc[aml_combind.clinc$Source != "TARGET",c("RUNX1","NPM1","DNMT3A","FLT3_ITD","TP53","WT1","IDH1","IDH2","TET2","complex","normal","t8_21","t15_17","t6_9","inv3","t_MLL")]
+mutMat<-aml_combind.clinc[aml_combind.clinc$Source != "TARGET",c("RUNX1","t8_21","t15_17","t6_9","inv3","t_MLL","inv16","complex","normal")]
+mutMat <- as.data.frame(mutMat)
+colSums(mutMat)
+genes <- colnames(mutMat)
+```
+
+###Pair interaction matrix of genes based on fisher.test
+```{r}
+interactions = sapply(1:ncol(mutMat), 
+                function(i) sapply(1:ncol(mutMat), 
+                  function(j) {
+                    f <- try(fisher.test(mutMat[, i], mutMat[, j]), silent = TRUE)
+                    if (class(f) == "try-error") 
+                      NA
+                    else ifelse(f$estimate > 1, -log10(f$p.val), log10(f$p.val))}))
+
+oddsRatio <-oddsGenes <-sapply(1:ncol(mutMat), 
+                function(i) sapply(1:ncol(mutMat),
+                  function(j) {
+                    f <- try(fisher.test(mutMat[, i], mutMat[, j]), silent = TRUE)
+                      if (class(f) == "try-error")
+                        f = NA
+                      else
+                        f$estimate
+  }))
+rownames(interactions) = colnames(interactions) = rownames(oddsRatio) = colnames(oddsRatio) = colnames(mutMat)
+```
+
+###Detail information of  pair interaction 
+```{r}
+sigPairs = which(x = 10^-abs(interactions) < 1, arr.ind = TRUE)
+sigPairs2 = which(x = 10^-abs(interactions) >= 1, arr.ind = TRUE)
+sigPairs = rbind(sigPairs, sigPairs2)
+sigPairsTbl = data.table::rbindlist(lapply(X = seq_along(1:nrow(sigPairs)),function(i) {
+                x = sigPairs[i,]
+                g1 = rownames(interactions[x[1], x[2], drop = FALSE])
+                g2 = colnames(interactions[x[1], x[2], drop = FALSE])
+                tbl = as.data.frame(table(apply(X = mutMat[, c(g1, g2), drop = FALSE], 1, paste, collapse = "")))
+                combn = data.frame(t(tbl$Freq))
+                colnames(combn) = tbl$Var1
+                pval = 10 ^ -abs(interactions[x[1], x[2]])
+                fest = oddsRatio[x[1], x[2]]
+                d = data.table::data.table(gene1 = g1, gene2 = g2, pValue = pval, oddsRatio = fest)
+                d = cbind(d, combn)
+                d
+              }), fill = TRUE)
+```
+
+```{r}
+sigPairsTbl <-  sigPairsTbl[!gene1 == gene2]
+sigPairsTbl[is.na(sigPairsTbl)] <- 0
+sigPairsTbl$Event <-  ifelse(test = sigPairsTbl$oddsRatio > 1, yes = "Co_Occurence", no = "Mutually_Exclusive")
+sigPairsTbl$pair <- apply(sigPairsTbl[, .(gene1, gene2)], 1, function(x)
+  paste(sort(unique(x)), collapse = ", "))
+sigPairsTbl[, `:=`(event_ratio, `01` + `10`)]
+sigPairsTbl[, `:=`(event_ratio, paste0(`11`, "/", event_ratio))]
+sigPairsTblSig = sigPairsTbl[order(as.numeric(pValue))][!duplicated(pair)]
+```
+
+###Process the interaction matrix for plot
+```{r}
+diag(interactions) <- 0
+m <- nrow(interactions)
+n <- ncol(interactions)
+col_pal = RColorBrewer::brewer.pal(11, "RdBu")
+col_pal = grDevices::colorRampPalette(colors = col_pal)
+col_pal = col_pal(m * n)
+interactions[lower.tri(x = interactions, diag = TRUE)] = NA
+gene_sum <- sigPairsTblSig[,.(gene1,`10`,`11`)]
+gene_sum <- gene_sum[, `:=`(Sum,`10` + `11`)]
+gene_sum <- gene_sum[,`:=`(Name, paste0(gene1,"[",Sum,"]"))]
+gene_sum <- unique(gene_sum[,.(gene1,Name)])
+index<-match(rownames(interactions),gene_sum$gene1)
+
+interactions[interactions > 3] = 3
+interactions[interactions < -3] = -3
+```
+
+
+###Heatmap display of interactions by image
+```{r}
+par(bty = "n", mar = c(1, 4, 4, 2) + 0.1, las = 2, fig = c(0, 1, 0, 1))
+image(x = 1:n, y = 1:m, interactions, col = col_pal, xaxt = "n", yaxt = "n", xlab = "", ylab = "", xlim = c(0, n + 1), ylim = c(0, n + 1))
+abline(h = 0:n + 0.5, col = "white", lwd = 0.5)
+abline(v = 0:n + 0.5, col = "white", lwd = 0.5)
+mtext(side = 2, at = 1:m, text = gene_sum$Name[index], cex = 0.8, font = 3)
+mtext(side = 3, at = 1:n, text = gene_sum$Name[index], cex = 0.8, font = 3)
+
+#countStats = match.arg(arg = "sig", choices = c("all", "sig"))
+#countType = match.arg(arg = "all", choices = c("all", "cooccur", "mutexcl"))
+pvalue = c(0.01, 0.05)
+w = arrayInd(which(10^-abs(interactions) < min(pvalue)), rep(m, 2))
+points(w, pch = "*", col = "black")
+w = arrayInd(which(10^-abs(interactions) < max(pvalue)), rep(m, 2))
+points(w, pch = ".", col = "black")
+points(x = n - 3, y = 0.7 * n, pch = "*", cex = 2)
+text(x = n - 3, y = 0.7 * n, paste0("P < ", min(pvalue)), pos = 4, cex = 0.9, adj = 0)
+points(x = n - 3, y = 0.65 * n, pch = ".", cex = 2)
+text(x = n - 3, y = 0.65 * n, paste0("P < ", max(pvalue)), pos = 4, cex = 0.9)
+
+
+par(fig = c(0.4, 0.7, 0, 0.4), new = TRUE)
+image(x = c(0.8, 1), y = seq(0, 1, length.out = 200), z = matrix(seq(0, 1, length.out = 200), nrow = 1), col = col_pal, xlim = c(0, 1), ylim = c(0, 1), axes = FALSE, 
+          xlab = NA, ylab = NA)
+atLims = seq(0, 1, length.out = 7)
+axis(side = 4, at = atLims, tcl = -0.15, labels = c("> 3 (Mutually exclusive)", 2, 1, 0, 1, 2, ">3 (Co-occurance)"), lwd = 0.5, cex.axis = 0.8, line = 0.2)
+text(x = 0.4, y = 0.5, labels = "-log10(P-value)", srt = 90,cex=1)
+    
+```
+

@@ -1,0 +1,387 @@
+---
+title: "Untitled"
+author: "Yabin Liu"
+date: "2019/5/27"
+output: html_document
+---
+
+```{r}
+library(DESeq2)
+library(ggplot2)
+library(vsn)
+library(ggbiplot)
+library(pheatmap)
+library(RColorBrewer)
+library(dendextend)
+library(affy)
+library(affyPLM)
+library(MAGeCKFlute)
+library(clusterProfiler)
+library(cowplot)
+library(UpSetR)
+```
+
+
+##Data Input
+```{r}
+countData <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/13.CCLE_ATRA_sensitivity/CCLE_RNAseq_ATRA_sensitivity4.count", header = TRUE, row.names = 1, sep = "\t")
+colData <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/13.CCLE_ATRA_sensitivity/CCLE_RNAseq_ATRA_sensitivity3.design", header = TRUE,  row.names = 1, sep = "\t")
+rownames(colData) <- gsub("-",".",rownames(colData))
+geneid_name <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/13.CCLE_ATRA_sensitivity/CCLE_RNAseq_genes.trans", header = TRUE, row.names = 1, sep = "\t")
+```
+
+```{r}
+ggplot(colData, aes(x = Tissue, fill=Sensitivity)) + geom_bar() + xlab("") + ylab("Number of samples") + ggtitle("") + theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1), plot.title = element_text(hjust = 0.5)) + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"), panel.background = element_blank()) + scale_fill_manual(values=c("#FB8072","#80B1D3"),  na.translate=TRUE, na.value="grey")
+
+
+colData<-colData[colData$Tissue != "blood",]
+colData<-colData[colData$Tissue != "soft_tissue",]
+colData<-colData[colData$Tissue != "pancreas",]
+```
+
+
+```{r}
+all(rownames(colData) %in% colnames(countData))
+countData_atra <- countData[, rownames(colData)]
+all(rownames(colData) == colnames(countData_atra))
+```
+
+##PCA controll
+```{r}
+#notAllZero <- (rowSums(countData_atra)>0)
+#count.pca <- prcomp(t(countData_atra[notAllZero,]), scale=FALSE)
+#count.pca2 <- data.frame(count.pca$x[,1:2], Condition=colData$Sensitivity)
+#ggbiplot(count.pca, choices = 1:2, var.axes=FALSE, obs.scale = 1, var.scale = 1,  groups=count.pca2$Condition, ellipse = TRUE, circle = FALSE, labels = rownames(count.pca2))
+```
+
+
+##DESeq2 analysis
+```{r}
+dds <- DESeqDataSetFromMatrix(countData = countData_atra, colData = colData, design =~ Condition)
+dds <- DESeq(dds)
+res <- results(dds, alpha = 0.05)
+resultsNames(dds)
+resOrdered = res[order(res$padj,na.last = TRUE),]
+plotMA(resOrdered, alpha = 0.01)
+```
+
+```{r}
+save.image(file="/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/13.CCLE_ATRA_sensitivity/ATRA_sensitivity.RData")
+```
+
+
+```{r}
+summary(resOrdered)
+deseq2_result <- data.frame(resOrdered)
+deseq2_result.annt <- merge(geneid_name, deseq2_result, by.x=0, by.y=0, all = F)
+
+deseq2_diff.annt<-subset(deseq2_result.annt, padj < 0.05 & abs(log2FoldChange) >= log2(1.5))
+deseq2_diff.up<-subset(deseq2_result.annt, padj < 0.05 & log2FoldChange >= log2(1.5))
+deseq2_diff.down<-subset(deseq2_result.annt, padj < 0.05 & log2FoldChange <= -log2(1.5))
+
+#write.table(deseq2_result.annt, file="/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/13.CCLE_ATRA_sensitivity/CCLE_RNAseq_ATRA_sensitivity.all.txt", quote = FALSE, sep = "\t",row.names = FALSE)
+
+write.table(deseq2_diff.up, file="/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/13.CCLE_ATRA_sensitivity/CCLE_RNAseq_ATRA_sensitivity.up.txt", quote = FALSE, sep = "\t",row.names = FALSE)
+
+#write.table(deseq2_diff.down, file="/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/13.CCLE_ATRA_sensitivity/CCLE_RNAseq_ATRA_sensitivity.down.txt", quote = FALSE, sep = "\t",row.names = FALSE)
+
+#write.table(deseq2_diff.annt, file="/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/13.CCLE_ATRA_sensitivity/CCLE_RNAseq_ATRA_sensitivity.diff.txt", quote = FALSE, sep = "\t",row.names = FALSE)
+```
+
+
+##Normaliztion
+```{r}
+d <- plotCounts(dds, gene=which.min(res$padj), intgroup="Condition", returnData=TRUE)
+ggplot(d, aes(x=Condition, y=count)) + geom_point(position=position_jitter(w=0.2,h=0))
+
+ntd <- normTransform(dds)
+vsd <- varianceStabilizingTransformation(dds, blind=FALSE)
+
+notAllZero <- (rowSums(counts(dds))>0)
+meanSdPlot(assay(ntd)[notAllZero,])
+meanSdPlot(assay(vsd[notAllZero,]))
+
+vsd.matrix <- assay(vsd)
+#vsd.pca <- prcomp(t(vsd.matrix), scale=FALSE)
+#vsd.pca2 <- data.frame(vsd.pca$x[,1:2], Condition=colData$Condition)
+#ggbiplot(vsd.pca, choices = 1:2, var.axes=FALSE, obs.scale = 1, var.scale = 1,  groups=vsd.pca2$Condition, ellipse = TRUE, circle = TRUE)
+```
+
+##heatmap
+```{r}
+deg.list <- rownames(data.frame(subset(resOrdered, padj < 0.05 & log2FoldChange >=   log2(1.5))))
+HTseq.vsd <- assay(vsd[deg.list,])
+annotation_col = data.frame(Sensitivity=colData$Sensitivity, Tissue=colData$Tissue)
+rownames(annotation_col) <- colnames(HTseq.vsd)
+pheatmap(log2(as.matrix(HTseq.vsd)+1), 
+         scale = "row",
+         show_rownames=FALSE,annotation_col=annotation_col,
+         annotation_names_col=FALSE,annotation_legend=TRUE, cluster_rows = TRUE, 
+         cluster_cols = TRUE, clustering_method = "complete",color = colorRampPalette(rev(brewer.pal(n = 11, name ="RdBu")))(100))
+```
+
+
+
+
+
+##CCLE corr  
+```{r}
+ccle_interest <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/13.CCLE_ATRA_sensitivity/CCLE_RNAseq_ATRA_sensitivity3.design.interest.txt", header = TRUE, row.names = 1, sep = "\t")
+```
+
+
+```{r}
+M_EX <- ccle_interest[,9:22]
+y <- ccle_interest$IC50
+names(y) <- 1:length(y)
+y<- data.frame(name=1:length(y), y, stringsAsFactors=F)
+ls_df <- lapply(1:ncol(M_EX), function(i){
+    x <- data.frame(name=1:nrow(M_EX), M_EX[,i], stringsAsFactors=F)
+    ls_res <- cor.test(x[,2], y[,2], method="pearson")
+    data.frame(tissue=colnames(M_EX)[i], cor=ls_res$estimate, pv=ls_res$p.value,stringsAsFactors=F)
+})
+
+df <- do.call(rbind, ls_df)
+df$rank <- rank(-1*df$cor,ties.method="first")
+df <- df %>% dplyr::arrange(rank)
+
+## polar dotplot
+df_tmp <- df
+df_tmp
+
+df_tmp$group[df_tmp[, "cor"] > 0] = "Positive"
+df_tmp$group[df_tmp[, "cor"] < 0] = "Negative"
+
+ggplot(data=df_tmp, aes(y=reorder(tissue,cor),x=cor)) + geom_point(aes(color=-log(pv)),size=5) +scale_colour_gradient2(low = '#E41A1C',mid='white', high = '#377EB8') + ggtitle("") +ylab("")+xlab("Pearson correlation") + geom_segment(x = rep(0,nrow(df_tmp)), y = seq(1,nrow(df_tmp)), xend = df_tmp[order(df_tmp$cor,decreasing=F),]$cor, yend = seq(1,nrow(df_tmp)), linetype = 3)  + geom_vline(xintercept = 0,color= "darkblue", linetype=2)
+```
+
+```{r}
+library(corrplot)
+corrplot(cor(M_EX), type="upper", order="hclust",tl.col="black", tl.srt=45)
+
+pheatmap(cor(M_EX),color = colorRampPalette(rev(brewer.pal(n = 9, name ="Blues")))(100))
+```
+
+```{r}
+ggplot(ccle_interest ,aes(x=Sensitivity,y=log(MYC))) + geom_boxplot(color="black") +geom_jitter(aes(color=Sensitivity),alpha=1,size=1)  + scale_color_manual(values=brewer.pal(n = 11, name ="Set1")) 
+
+#+ scale_y_continuous(breaks=seq(0, 1000, 100))+
+```
+
+```{r}
+
+counts.plot = data.frame()
+for (x in seq(9,22,by=1)){
+  A <- data.frame(Name=row.names(ccle_interest), Sensitivity=ccle_interest$Sensitivity, FPKM=ccle_interest[,x], Gene=rep(colnames(ccle_interest)[x],nrow(ccle_interest)))
+  counts.plot = rbind(counts.plot, A)
+}
+
+p<-ggplot(data=counts.plot, aes(x=Sensitivity,y=log(FPKM)))+geom_boxplot(aes(color=Sensitivity)) + geom_jitter(aes(color=Sensitivity),alpha=1,size=1) + ylab("Log2(FPKM)") + ggtitle("") + xlab("")  + scale_color_manual(values=c(brewer.pal(n = 11, name ="Set1")[2], brewer.pal(n = 11, name ="Set1")[1]))
+p + facet_wrap(~ Gene, scales="free", ncol=7) + theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1), plot.title = element_text(hjust = 0))
+```
+
+##Volcano Plot by diffgene
+```{r}
+ccle_volcano <- data.frame(Gene=deseq2_result.annt$Description, LFC=deseq2_result.annt$log2FoldChange, Padj=deseq2_result.annt$padj)
+labelname<-as.character(colnames(ccle_interest)[9:22])
+
+min <- log2(2)
+pv <- 0.01
+ccle_volcano$group = "no"
+ccle_volcano$group[ccle_volcano[,"LFC"] > min & ccle_volcano[,"Padj"] < pv ] = "up"
+ccle_volcano$group[ccle_volcano[,"LFC"] < -min & ccle_volcano[,"Padj"] < pv ] = "down"
+ccle_volcano$LPV <- -log10(ccle_volcano[,"Padj"])
+ccle_volcano$group[ccle_volcano$Gene %in% labelname] = "cs"
+
+ccle_volcano$LPV[ccle_volcano[,"LPV"] > 40] = 40
+
+A0 <- ggplot(ccle_volcano, aes(x = LFC, y = LPV, colour = group, fill = group)) 
+A0 <- A0 + geom_jitter(position = "jitter", show.legend = FALSE, alpha = 0.5, size = 0.3) 
+A0 <- A0 + scale_color_manual(values = c(no = "gray80", up = brewer.pal(n = 9, name ="Set1")[1], down = brewer.pal(n = 9, name ="Set1")[2],cs = "#54278F"))
+A0 <- A0 + scale_fill_manual(values = c(no = "gray80", up = brewer.pal(n = 9, name ="Set1")[1], down = brewer.pal(n = 9, name ="Set1")[2],cs = "#54278F"))
+A0 <- A0 + theme(text = element_text(colour = "black", size = 14, family = "Helvetica"), plot.title = element_text(hjust = 0.5, size = 16), axis.text = element_text(colour = "gray10"))
+A0 <- A0 + theme(axis.line = element_line(size = 0.5, colour = "black"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.border = element_blank(), panel.background = element_blank())
+A0 <- A0 + geom_hline(yintercept = -log10(0.01), linetype = "dotted")
+A0 <- A0 + geom_vline(xintercept = c(min,-min), linetype = "dotted")
+A0 <- A0 + ggrepel::geom_text_repel(aes(x = ccle_volcano[ccle_volcano$Gene %in% labelname, "LFC"], y = ccle_volcano[ccle_volcano$Gene %in% labelname, "LPV"], label = Gene), data = ccle_volcano[ccle_volcano$Gene %in% labelname, ], fontface = "bold", size = 2.5, box.padding = unit(0.4, "lines"), segment.color = "grey50", point.padding = unit(0.3, "lines"), segment.size = 0.3)
+A0 + theme(legend.position = "none") + xlab("log2 FoldChange") + ylab("-Log10(P value)") + ylim(0,40)
+```
+
+
+##Volcano Plot by DELTACS 
+```{r}
+gene_CS <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/09.MAGeCKFlute/CS_result_Day21.txt", sep="\t", header = TRUE)
+gene_CS <- data.frame(Gene=gene_CS[,1], DeltaCS=gene_CS[,2], Pvalue=gene_CS[,5], FDR=p.adjust(gene_CS[,5],method="BH",n=length(gene_CS[,5])))
+labelname<-as.character(deseq2_diff.up[,2])
+
+min <- 0
+gene_CS$group = "no"
+gene_CS$group[gene_CS[, "DeltaCS"] > min + log2(2) & gene_CS[, "Pvalue"] < 0.05] = "up"
+gene_CS$LPV = -log10(gene_CS[,"Pvalue"])
+
+gene_CS$group[gene_CS$Gene %in% labelname] = "mate"
+
+labelname2 <- as.character(colnames(ccle_interest)[9:22])
+A0 <- ggplot(gene_CS, aes(x = DeltaCS, y = LPV, colour = group, fill = group)) 
+A0 <- A0 + geom_jitter(position = "jitter", show.legend = FALSE, alpha = 0.5, size = 0.3) 
+A0 <- A0 + scale_color_manual(values = c(no = "gray80", up = "#e41a1c", mate = "#54278F"))
+A0 <- A0 + scale_fill_manual(values = c(no = "gray80", up = "#e41a1c", mate = "#54278F"))
+A0 <- A0 + theme(text = element_text(colour = "black", size = 14, family = "Helvetica"), plot.title = element_text(hjust = 0.5, size = 16), axis.text = element_text(colour = "gray10"))
+A0 <- A0 + theme(axis.line = element_line(size = 0.5, colour = "black"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.border = element_blank(), panel.background = element_blank())
+A0 <- A0 + geom_hline(yintercept = -log10(0.05), linetype = "dotted")
+A0 <- A0 + geom_vline(xintercept = min+log2(2), linetype = "dotted")
+#A0 <- A0 + ggrepel::geom_text_repel(aes(x = gene_CS[gene_CS$Gene %in% labelname, "DeltaCS"], y = gene_CS[gene_CS$Gene %in% labelname, "LPV"], label = Gene), data = gene_CS[gene_CS$Gene %in% labelname, ], fontface = "bold", size = 2.5, box.padding = unit(0.4, "lines"), segment.color = "grey50", point.padding = unit(0.3, "lines"), segment.size = 0.3)
+A0 <- A0 + ggrepel::geom_text_repel(aes(x = gene_CS[gene_CS$Gene %in% labelname2, "DeltaCS"], y = gene_CS[gene_CS$Gene %in% labelname2, "LPV"], label = Gene), data = gene_CS[gene_CS$Gene %in% labelname2, ], fontface = "bold", size = 2.5, box.padding = unit(0.4, "lines"), segment.color = "grey50", point.padding = unit(0.3, "lines"), segment.size = 0.3)
+A0 + theme(legend.position = "none") + xlab("Delta Crispr Score") + ylab("-Log10(P value)") + ggtitle("ATRA Day21") 
+```
+
+
+```{r}
+sgrna_CS <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/09.MAGeCKFlute/CS_delta_Day21.sgrna.txt", sep="\t", header = TRUE)
+sgrna_CS <- data.frame(sgrna=sgrna_CS$sgRNA, Gene=sgrna_CS$Gene, LFC=sgrna_CS$Delta_CS)
+sgrna_CS$FDR = "na"
+
+B0<-sgRankView(sgrna_CS, top = 0 , bottom = 0, gene = labelname2) + xlim(min(sgrna_CS$LFC),max(sgrna_CS$LFC))
+B0 + xlab("Delta Crispr Score")
+```
+
+
+##IRF1
+```{r}
+ccle_interest2 <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/13.CCLE_ATRA_sensitivity/CCLE_RNAseq_ATRA_sensitivity3.design.interest2.txt", header = TRUE, row.names = 1, sep = "\t")
+ggplot(ccle_interest2,aes(x=Sensitivity,y=log(IRF1))) +geom_boxplot(aes(color=Sensitivity)) + geom_jitter(aes(color=Sensitivity),alpha=1,size=1)+geom_jitter(aes(color=Sensitivity),alpha=1,size=1)  + scale_color_manual(values=brewer.pal(n = 9, name ="Set1")) 
+
+ggplot(ccle_interest2,aes(x=Sensitivity,y=log(IC50))) +geom_boxplot(aes(color=Sensitivity)) + geom_jitter(aes(color=Sensitivity),alpha=1,size=1)+geom_jitter(aes(color=Sensitivity),alpha=1,size=1)  + scale_color_manual(values=brewer.pal(n = 9, name ="Set1")) 
+
+v.high <- ccle_interest2[ccle_interest2$Sensitivity == "High",]$IRF1
+v.low <- ccle_interest2[ccle_interest2$Sensitivity == "Low",]$IRF1
+t.test(v.high, v.low, alternative="two.sided")
+t.test(v.high, v.low, alternative="greater")
+
+ks.test(v.high, v.low)
+cor(ccle_interest2$IC50, ccle_interest2$IRF1)
+
+
+
+```
+
+```{r}
+ccle_interest3 <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/13.CCLE_ATRA_sensitivity/CCLE_RNAseq_ATRA_sensitivity3.design.interest3.txt", header = TRUE, row.names = 1, sep = "\t")
+
+blood.ccle<-ccle_interest3[ccle_interest3$TCGA.classification == "LAML",]
+
+
+ggplot(blood.ccle,aes(x=Sensitivity,y=log(IRF1))) +geom_boxplot(aes(color=Sensitivity)) + geom_jitter(aes(color=Sensitivity),alpha=1,size=1)+geom_jitter(aes(color=Sensitivity),alpha=1,size=1)  + scale_color_manual(values=brewer.pal(n = 9, name ="Set1"))
+
+
+
+v.high <- blood.ccle[blood.ccle$Sensitivity == "High",]$IRF1
+v.low <- blood.ccle[blood.ccle$Sensitivity == "Low",]$IRF1
+
+
+t.test(v.high, v.low, alternative="two.sided")
+ks.test(v.high, v.low)
+
+cor(blood.ccle$IC50, blood.ccle$IRF1)
+
+ggplot(blood.ccle,aes(x=IC50,y=IRF1)) + geom_point(size = 5, alpha = 1, color = "grey") + geom_smooth(method = "lm", se = FALSE) +  theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"), panel.background = element_blank())  + ggtitle("") + scale_y_log10()
+```
+
+
+```{r}
+p<-ggplot(data=ccle_interest3, aes(x=Sensitivity,y=log(IRF1)))+geom_boxplot(aes(color=Sensitivity)) + geom_jitter(aes(color=Sensitivity),alpha=1,size=1) + ylab("Log2(FPKM)") + ggtitle("") + xlab("")  + scale_color_manual(values=c(brewer.pal(n = 11, name ="Set1")[2], brewer.pal(n = 9, name ="Set1")[1]))
+p + facet_wrap(~ Tissue, scales="free") + theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1), plot.title = element_text(hjust = 0))
+```
+
+
+```{r}
+ccle_up <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/13.CCLE_ATRA_sensitivity/venn/CCLE_RNAseq_ATRA_sensitivity3.up.list", header=FALSE)
+ccle_up$Sensitivity <- 1
+colnames(ccle_up) <- c("Gene", "Sensitivity")
+
+cs_pos_d7 <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/13.CCLE_ATRA_sensitivity/venn/CS_result_Day7.postive.list", header=FALSE)
+cs_pos_d7$Day7 <-1
+colnames(cs_pos_d7) <- c("Gene", "Day7")
+
+cs_pos_d14 <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/13.CCLE_ATRA_sensitivity/venn/CS_result_Day14.postive.list", header=FALSE)
+cs_pos_d14$Day14 <-1
+colnames(cs_pos_d14) <- c("Gene", "Day14")
+
+cs_pos_d21_1 <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/13.CCLE_ATRA_sensitivity/venn/CS_result_Day21_1.postive.list", header=FALSE)
+cs_pos_d21_1$Day21_1 <-1
+colnames(cs_pos_d21_1) <- c("Gene", "Day21_1")
+
+cs_pos_d21_2 <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/13.CCLE_ATRA_sensitivity/venn/CS_result_Day21_2.postive.list", header=FALSE)
+cs_pos_d21_2$Day21_2 <-1
+colnames(cs_pos_d21_2) <- c("Gene", "Day21_2")
+
+cs_pos_d21_m <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/13.CCLE_ATRA_sensitivity/venn/CS_result_Day21.postive.list", header=TRUE)
+cs_pos_d21_m$Day21_m <-1
+colnames(cs_pos_d21_m) <- c("Gene", "Day21_m")
+```
+
+```{r}
+#cs_pos_merge<-merge(ccle_up, cs_pos_d7, by="Gene",all=T)
+cs_pos_merge<-merge(cs_pos_d7, cs_pos_d14, by="Gene",all=T)
+cs_pos_merge<-merge(cs_pos_merge, cs_pos_d21_1, by="Gene",all=T)
+cs_pos_merge<-merge(cs_pos_merge, cs_pos_d21_2, by="Gene",all=T)
+cs_pos_merge<-merge(cs_pos_merge, cs_pos_d21_m, by="Gene",all=T)
+
+cs_pos_merge[is.na(cs_pos_merge)] <- 0
+
+
+between <- function(row, set1, set2){
+  newData <- (row[set1] == 1) & (row[set2] == 1)
+}
+
+
+
+#      queries = list(
+#                list(query = intersects, params = list("Sensitivity", "Day7","Day21_1", "Day21_2"), active=T,color=brewer.pal(4,"Set1")[1]), 
+#                list(query = intersects, params = list("Sensitivity", "Day14","Day21_1", "Day21_2"), active=T,color=brewer.pal(4,"Set1")[1]),
+#                list(query = intersects, params = list("Sensitivity", "Day21_1", "Day21_2"), active=T,color=brewer.pal(4,"Set1")[1]), 
+#                list(query = intersects, params = list("Sensitivity", "Day21_1"), active=T,color=brewer.pal(4,"Set1")[1]),
+#                list(query = intersects, params = list("Sensitivity", "Day21_2"), active=T,color=brewer.pal(4,"Set1")[1])),
+#      order.by = "freq"
+
+
+
+upset(cs_pos_merge,  
+#           queries = list(
+#                list(query = intersects, params = list("Sensitivity", "Day21_m","Day21_1", "Day21_2"), active=T,color=brewer.pal(4,"Set1")[1]), 
+#                list(query = intersects, params = list("Sensitivity", "Day21_m","Day21_2"), active=T,color=brewer.pal(4,"Set1")[1]),
+#                list(query = intersects, params = list("Sensitivity", "Day21_m"), active=T,color=brewer.pal(4,"Set1")[1]), 
+#                list(query = intersects, params = list("Sensitivity", "Day21_1"), active=T,color=brewer.pal(4,"Set1")[1]),
+#                list(query = intersects, params = list("Sensitivity", "Day21_2"), active=T,color=brewer.pal(4,"Set1")[1])),
+#      order.by = "freq",
+      matrix.color = brewer.pal(9,"Blues")[6], 
+      main.bar.color =brewer.pal(9,"Blues")[6],
+      sets.bar.color = brewer.pal(5,"Set2")
+      )
+
+```
+
+
+```{r}
+
+cs_clust_7<-data.frame(Symbol=cs_pos_d7$Gene, Type=rep("Day7", dim(cs_pos_d7)[1]))
+cs_clust_14<-data.frame(Symbol=cs_pos_d14$Gene, Type=rep("Day14", dim(cs_pos_d14)[1]))
+cs_clust_1<-data.frame(Symbol=cs_pos_d21_1$Gene, Type=rep("Day21_1", dim(cs_pos_d21_1)[1]))
+cs_clust_2<-data.frame(Symbol=cs_pos_d21_2$Gene, Type=rep("Day21_2", dim(cs_pos_d21_2)[1]))
+cs_clust_m<-data.frame(Symbol=cs_pos_d21_m$Gene, Type=rep("Day21_m", dim(cs_pos_d21_m)[1]))
+cs_enrich <- rbind(cs_clust_7,cs_clust_14,cs_clust_1,cs_clust_2,cs_clust_m)
+
+cs_enrich$Entrez <- TransGeneID(cs_enrich$Symbol, "Symbol", "Entrez", organism = "hsa")
+```
+
+```{r}
+cs_BP <- compareCluster(geneCluster = Entrez~Type, data=cs_enrich, fun = "enrichGO",OrgDb = org.Hs.eg.db,  keyType = 'ENTREZID', readable  = TRUE, ont="BP")
+dotplot(cs_BP)
+cs_MF <- compareCluster(geneCluster =  Entrez~Type, data=cs_enrich, fun = "enrichGO",OrgDb = org.Hs.eg.db,  keyType = 'ENTREZID', readable  = TRUE, ont="MF")
+dotplot(cs_MF)
+cs_CC <- compareCluster(geneCluster =  Entrez~Type, data=cs_enrich, fun = "enrichGO",OrgDb = org.Hs.eg.db,  keyType = 'ENTREZID', readable  = TRUE, ont="CC")
+dotplot(cs_CC)
+ck_KEGG <- compareCluster(geneCluster =  Entrez~Type, data=cs_enrich, fun = "enrichKEGG",organism = "hsa")
+dotplot(ck_KEGG)
+```
+

@@ -1,0 +1,615 @@
+---
+title: "Untitled"
+author: "Yabin Liu"
+date: "2019/5/6"
+output: html_document
+---
+
+
+```{r}
+library(dendextend)
+library(corrplot)
+library("RColorBrewer")
+library(pheatmap)
+library("MAGeCKFlute")
+library(sva)
+library(cowplot)
+library(devtools)
+#install_github("vqv/ggbiplot")
+library("ggbiplot")
+library(magrittr)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(msigdbr)
+library(ggpmisc)
+#remotes::install_github("GuangchuangYu/enrichplot")
+```
+
+##ComBat remove batch effect 
+###correlation and PCA
+```{r}
+sgrna_count <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/09.MAGeCKFlute/NB4_Crispr_screen.count.txt", sep="\t", header = TRUE, row.names = 1)
+
+sgrna_matrix <- sgrna_count[,c(2:12,15,16)]
+highcount<-row.names(subset(as.data.frame(rowSums(sgrna_matrix)), rowSums(sgrna_matrix) > 50))
+
+sgrna_matrix <- sgrna_matrix[highcount,]
+```
+
+```{r}
+corrplot(cor(sgrna_matrix), type="upper", order="hclust",tl.col="black", tl.srt=45)
+
+pheatmap(cor(sgrna_matrix))
+```
+
+###Before remove batch effect
+```{r}
+sgrna.pca <- prcomp(t(sgrna_matrix), scale=TRUE)
+sample<-rownames(t(sgrna_matrix))
+Sample <- factor(t(data.frame(strsplit(sample, split = "_Lib")))[,1])
+Library <- factor(t(data.frame(strsplit(sample, split = "_Lib")))[,2])
+sgrna.pca2 <- data.frame(sgrna.pca$x[,1:2], Library, Sample)
+
+p1<-ggplot(sgrna.pca2, aes(PC1, PC2, shape=Library)) + geom_point(aes(colour = Sample))  + theme(axis.line = element_line(size = 0.5, colour = "black"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.border = element_blank(), panel.background = element_blank())
+
+p2<-ggbiplot(sgrna.pca, choices = 1:2, var.axes=FALSE, obs.scale = 1, var.scale = 1,  groups=as.character(Sample), ellipse = TRUE, circle = TRUE)
+```
+
+###After remove batch effect
+```{r}
+batchMat<-data.frame(sample= rownames(t(sgrna_matrix)), batch=Library, process=Sample)
+rownames(batchMat) <- rownames(t(sgrna_matrix))
+#design.grp <- c(1,1,2,2,3,3,4,4,5,5)
+#sva.batch <- as.character(c(1,2,1,2,1,2,1,2,1,2))
+#design.mat <- model.matrix(~design.grp)
+#sgrna_sva <- ComBat(sgrna_matrix, batch = sva.batch)
+sgrna_sva <- BatchRemove(sgrna_matrix, batchMat)  #, positive = TRUE
+sgrna_sva <- sgrna_sva$data
+
+pheatmap(cor(sgrna_sva), clustering_method = "average")
+
+sgrna.pca <- prcomp(t(sgrna_sva), scale=TRUE)
+sample<-rownames(t(sgrna_sva))
+Sample <- factor(t(data.frame(strsplit(sample, split = "_Lib")))[,1])
+Library <- factor(t(data.frame(strsplit(sample, split = "_Lib")))[,2])
+sgrna.pca2 <- data.frame(sgrna.pca$x[,1:2], Library, Sample)
+p3<-ggplot(sgrna.pca2, aes(PC1, PC2, shape=Library)) + geom_point(aes(colour = Sample))  + theme(axis.line = element_line(size = 0.5, colour = "black"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.border = element_blank(), panel.background = element_blank())
+p4<-ggbiplot(sgrna.pca, choices = 1:2, var.axes=FALSE, obs.scale = 1, var.scale = 1,  groups=as.character(Sample), ellipse = TRUE, circle = TRUE)
+```
+
+
+```{r}
+plot_grid(p1,p3,p2,p4, labels=c("A","B","C","D"), align="hv")
+write.table(sgrna_sva, file="/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/09.MAGeCKFlute/NB4_Crispr_screen.count.sva.txt",quote = FALSE, sep = "\t")
+
+
+```
+
+
+##Day21 Volcano Plot bak
+```{r}
+gene_CS <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/09.MAGeCKFlute/result_1/CS_result_Day21.txt", sep="\t", header = TRUE)
+gene_CS <- data.frame(Gene=gene_CS[,1], DeltaCS=gene_CS[,2], Pvalue=gene_CS[,4], FDR=p.adjust(gene_CS[,3],method="BH",n=length(gene_CS[,3])))
+#A0<-VolcanoView(gene_CS, x = "DeltaCS", y = "Pvalue", x_cutoff = log2(1.5), y_cutoff = 0.5,Label = "Gene",top=10, xlab = "Delta Crispr Score", ylab="Log10(P value)")+xlim(-7,9)+ylim(0,7)+ ggtitle("ATRA Day21")
+#A0
+```
+
+##Day21 Volcano Plot
+```{r}
+gene_CS <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/09.MAGeCKFlute/CS_result_Day21.txt", sep="\t", header = TRUE)
+gene_CS <- data.frame(Gene=gene_CS[,1], DeltaCS=gene_CS[,2], Pvalue=gene_CS[,5], FDR=p.adjust(gene_CS[,5],method="BH",n=length(gene_CS[,5])))
+A<-VolcanoView(gene_CS, x = "DeltaCS", y = "Pvalue", x_cutoff = log2(1.5), y_cutoff = 0.05,Label = "Gene",top=20, xlab = "Delta Crispr Score", ylab="Log10(P value)")+ ggtitle("ATRA Day21")
+A
+```
+
+###custom volcano plot
+```{r}
+min <- 0
+gene_CS$group = "no"
+gene_CS$group[gene_CS[, "DeltaCS"] > min + log2(2) & gene_CS[, "Pvalue"] < 0.05] = "up"
+gene_CS$LPV = -log10(gene_CS[,"Pvalue"])
+
+#labelname<-read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/09.MAGeCKFlute/CS_ES.gene.list", sep="\t", header = FALSE)
+
+labelname<-read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/13.CCLE_ATRA_sensitivity/CCLE_RNAseq_ATRA_sensitivity.up.txt", sep="\t", header = TRUE)
+
+labelname<-as.character(labelname[,2])
+#gene_CS[gene_CS$Gene %in% labelname,]
+
+gene_CS$group[gene_CS$Gene %in% labelname] = "mate"
+labelname2 <- c("RARA", "CEBPE", "BRD4", "RXRA", "ATP6V1B2", "SPC24", "ING3",  "UBE2D3", "SPI1")
+A0 <- ggplot(gene_CS, aes(x = DeltaCS, y = LPV, colour = group, fill = group)) 
+A0 <- A0 + geom_jitter(position = "jitter", show.legend = FALSE, alpha = 0.5, size = 0.3) 
+A0 <- A0 + scale_color_manual(values = c(no = "gray80", up = "#e41a1c", mate = "#54278F"))
+A0 <- A0 + scale_fill_manual(values = c(no = "gray80", up = "#e41a1c", mate = "#54278F"))
+A0 <- A0 + theme(text = element_text(colour = "black", size = 14, family = "Helvetica"), plot.title = element_text(hjust = 0.5, size = 16), axis.text = element_text(colour = "gray10"))
+A0 <- A0 + theme(axis.line = element_line(size = 0.5, colour = "black"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.border = element_blank(), panel.background = element_blank())
+A0 <- A0 + geom_hline(yintercept = -log10(0.05), linetype = "dotted")
+A0 <- A0 + geom_vline(xintercept = min+log2(2), linetype = "dotted")
+#A0 <- A0 + ggrepel::geom_text_repel(aes(x = gene_CS[gene_CS$Gene %in% labelname, "DeltaCS"], y = gene_CS[gene_CS$Gene %in% labelname, "LPV"], label = Gene), data = gene_CS[gene_CS$Gene %in% labelname, ], fontface = "bold", size = 2.5, box.padding = unit(0.4, "lines"), segment.color = "grey50", point.padding = unit(0.3, "lines"), segment.size = 0.3)
+A0 <- A0 + ggrepel::geom_text_repel(aes(x = gene_CS[gene_CS$Gene %in% labelname2, "DeltaCS"], y = gene_CS[gene_CS$Gene %in% labelname2, "LPV"], label = Gene), data = gene_CS[gene_CS$Gene %in% labelname2, ], fontface = "bold", size = 2.5, box.padding = unit(0.4, "lines"), segment.color = "grey50", point.padding = unit(0.3, "lines"), segment.size = 0.3)
+A0 + theme(legend.position = "none") + xlab("Delta Crispr Score") + ylab("-Log10(P value)") + ggtitle("ATRA Day21") 
+
+```
+
+###sgRNA display
+```{r}
+sgrna_CS <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/09.MAGeCKFlute/CS_delta_Day21.sgrna.txt", sep="\t", header = TRUE)
+sgrna_CS <- data.frame(sgrna=sgrna_CS$sgRNA, Gene=sgrna_CS$Gene, LFC=sgrna_CS$Delta_CS)
+sgrna_CS$FDR = "na"
+
+B0<-sgRankView(sgrna_CS, top = 0 , bottom = 0, gene = c("RARA", "CEBPE", "BRD4", "RXRA", "ATP6V1B2", "SPC24", "ING3", "UBE2D3" , "SPI1")) + xlim(min(sgrna_CS$LFC),max(sgrna_CS$LFC))
+
+A0<-A0 + theme(legend.position = "none") + xlab("Delta Crispr Score") + ylab("-Log10(P value)") + ggtitle("ATRA Day21")  + xlim(min(sgrna_CS$LFC),max(sgrna_CS$LFC))
+```
+
+###Negative Control
+```{r}
+sgrna_NC <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/09.MAGeCKFlute/CS_NC.sgrna.txt", sep="\t", header = TRUE)
+#sgrna_NC<-sgrna_CS
+#sgrna_NC$Delta_CS <- sgrna_NC$LFC
+sgrna_NC$Name  = "NC" 
+
+m <- ggplot(sgrna_NC, aes(x=Delta_CS, fill=Name))
+m <- m + geom_density(size=1, alpha=.4, color = "grey")  + scale_fill_manual(values = "darkblue")
+m <- m + theme(axis.line = element_line(size = 0.5, colour = "black"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.border = element_blank(), panel.background = element_blank())
+mb<-ggplot_build(m)
+mb.data <- mb[['data']][[1]]
+#m<-m + stat_peaks(data = mb[['data']][[1]], aes(x=x,y=density), colour="red", size=3)
+#mb2<-ggplot_build(m)
+#mb.data2 <- mb2[['data']][[2]]
+
+min <- 0
+min2 <- log2(2)
+m<-m + geom_vline(xintercept=min, linetype = "dotted", colour = "blue") + annotate("text",label=min, x= min,y=0.1) + xlim(min(sgrna_CS$LFC),max(sgrna_CS$LFC))  + theme(legend.position = "none") + geom_vline(xintercept=min2, linetype = "dotted", colour = "red") + annotate("text",label=min2, x= min2,y=0.05)
+
+#+ geom_vline(xintercept=mb.data2$xintercept[1:2], linetype = "dotted") + annotate("text",label=mb.data2$label[1:2], x=mb.data2$xintercept[1:2] -1,y=mb.data2$yintercept[1:2]) + xlim(min(sgrna_CS$LFC),max(sgrna_CS$LFC)) 
+#+ geom_vline(xintercept=mean(sgrna_NC$Delta_CS), linetype = "dotted", colour = "blue") + annotate("text",label=mean(sgrna_NC$Delta_CS), x= mean(sgrna_NC$Delta_CS)+1.5,y=0.2)
+
+```
+
+```{r}
+binwidth = 5
+line.size = 1
+sgrna_NC$x_end = sgrna_NC$Delta_CS - line.size * 0.02
+
+p<-ggplot(sgrna_NC, aes(x = Delta_CS, y = Name)) + geom_segment(aes(x = min(sgrna_CS$LFC), xend = max(sgrna_CS$LFC), yend = Name), size = binwidth + 5 + line.size * 0.5, colour = "black", lineend = "butt")
+p<- p + geom_segment(aes(x = min(sgrna_CS$LFC) + line.size * 0.01,  xend = max(sgrna_CS$LFC) - line.size * 0.01, yend = Name),  size = binwidth + 5, colour = "gray80", lineend = "butt")
+p<- p + geom_segment(aes(xend = x_end, yend = Name), size = binwidth + 5, color = brewer.pal(n=9, name="YlGnBu")[9], alpha = 0.2)
+p<- p + theme(axis.line = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.border = element_blank(), panel.background = element_blank())
+p<- p + labs(x = NULL, y = NULL) + theme(legend.position = "none")
+p<- p + theme(text = element_text(colour = "black", size = 14, family = "Helvetica"), plot.title = element_text(hjust = 0.5, size = 18), axis.text = element_text(colour = "gray10"))
+
+```
+
+```{r}
+plot_grid(A0,m,p,B0, nrow=4, align = "v", rel_heights = c(2.5,1,2,2), labels=c("A","B","C","D"))
+```
+
+##NC count normalization
+```{r}
+sgrna_NC.count <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/09.MAGeCKFlute/ATRA_Day21.count.nc.txt", sep="\t", header = TRUE)
+sgrna_NC.plot <- data.frame()
+for (x in seq(3,6,by=1)){
+  plot <- data.frame(sgRNA=sgrna_NC.count$sgRNA, Count=sgrna_NC.count[,x], Sample = rep(colnames(sgrna_NC.count)[x],nrow(sgrna_NC.count))) 
+  sgrna_NC.plot <- rbind(sgrna_NC.plot, plot)
+}
+X1<-ggplot(sgrna_NC.plot, aes(x=log10(Count), fill=Sample)) + geom_density(size=0.5, alpha=.4, color="grey")+ theme(legend.position = "right")+ ggtitle("Distribution of nonessential genes")
+```
+
+
+```{r}
+sgrna_NC.count <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/09.MAGeCKFlute/ATRA_Day21.count_normalized.nc.txt", sep="\t", header = TRUE)
+sgrna_NC.plot <- data.frame()
+for (x in seq(3,6,by=1)){
+  plot <- data.frame(sgRNA=sgrna_NC.count$sgRNA, Count=sgrna_NC.count[,x], Sample = rep(colnames(sgrna_NC.count)[x],nrow(sgrna_NC.count))) 
+  sgrna_NC.plot <- rbind(sgrna_NC.plot, plot)
+}
+X2<-ggplot(sgrna_NC.plot, aes(x=log10(Count), fill=Sample)) + geom_density(size=0.5, alpha=.4,color="grey") + xlab("log10(Norm Count)") + theme(legend.position = "right") + ggtitle("Distribution of nonessential genes")
+```
+
+```{r}
+plot_grid(X1,X2,labels=c("A","B"))
+```
+
+
+##Normalization with essential genes
+```{r}
+gene_CS <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/09.MAGeCKFlute/CS_result_Day21.txt", sep="\t", header = TRUE)
+es.gene<-read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/09.MAGeCKFlute/CS_ES.gene.list", sep="\t", header = FALSE)
+
+gene_CS$group = "no"
+gene_CS$group[gene_CS$Gene %in% es.gene$V1] = "es"
+
+rownames(gene_CS) <- gene_CS$Gene
+mean(gene_CS[es.gene$V1,]$ATRA_CS)
+mean(gene_CS[es.gene$V1,]$NONE_CS)
+
+
+CS_norm <- data.frame( ATRA_CS_norm = as.data.frame(gene_CS$ATRA_CS / (abs(median(gene_CS[es.gene$V1,]$ATRA_CS)) + 0.8)), NONE_CS_norm = as.data.frame(gene_CS$NONE_CS / (abs(median(gene_CS[es.gene$V1,]$NONE_CS)) + 0.8)))
+colnames(CS_norm) <- c("ATRA_CS_norm","NONE_CS_norm")
+gene_CS <-cbind(gene_CS,CS_norm)
+
+ggplot(gene_CS, aes(x=ATRA_CS)) + geom_density(size=0.5, alpha=.4)
+ggplot(gene_CS, aes(x=NONE_CS)) + geom_density(size=0.5, alpha=.4)
+
+ggplot(gene_CS, aes(x=ATRA_CS_norm)) + geom_density(size=0.5, alpha=.4)
+ggplot(gene_CS, aes(x=NONE_CS_norm)) + geom_density(size=0.5, alpha=.4)
+
+```
+```{r}
+coef(lm(gene_CS$ATRA_CS~1+gene_CS$NONE_CS))
+N1 <- ggplot(gene_CS, aes(x = NONE_CS, y = ATRA_CS, colour = group, fill = group)) 
+N1 <- N1 +  geom_jitter(position = "jitter", show.legend = TRUE, alpha = 0.5, size = 0.3) 
+N1 <- N1 + geom_abline(intercept = 0, slope = coef(lm(gene_CS$ATRA_CS~1+gene_CS$NONE_CS))[2], linetype = "dotted")
+
+N1 <- N1 + geom_hline(yintercept = c(0,-1), linetype = "dotted")
+N1 <- N1 + geom_vline(xintercept = c(0,-1), linetype = "dotted")+ xlim(-4,4) + ylim(-4,4)
+```
+
+```{r}
+
+coef(lm(gene_CS$ATRA_CS_norm~1+gene_CS$NONE_CS_norm))
+N2 <- ggplot(gene_CS, aes(x = NONE_CS_norm, y = ATRA_CS_norm, colour = group, fill = group))
+N2 <- N2 +  geom_jitter(position = "jitter", show.legend = TRUE, alpha = 0.5, size = 0.3) 
+N2 <- N2 + geom_abline(intercept = 0, slope = coef(lm(gene_CS$ATRA_CS~1+gene_CS$NONE_CS))[2], linetype = "dotted") 
+N2 <- N2 + geom_hline(yintercept = c(0,-1), linetype = "dotted") 
+N2 <- N2 + geom_vline(xintercept = c(0,-1), linetype = "dotted") + xlim(-4,4) + ylim(-4,4)
+
+```
+
+```{r}
+plot_grid(N1,N2)
+```
+
+##GO analysis
+```{r}
+gene_CS <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/09.MAGeCKFlute/CS_result_Day21.txt", sep="\t", header = TRUE)
+dd.cs <- data.frame(Official=gene_CS$Gene,LFC=gene_CS$Delta_CS,FDR=gene_CS$Pvalue)
+dd.cs$Entrez <- TransGeneID(dd.cs$Official, "Symbol", "Entrez", organism = "hsa")
+idx <- is.na(dd.cs$Entrez) | duplicated(dd.cs$Entrez)
+dd.cs <- dd.cs[!idx, ]
+rownames(dd.cs) <- as.character(dd.cs$Entrez)
+```
+
+```{r}
+geneList= dd.cs$LFC
+names(geneList) = dd.cs$Official
+RankView(geneList,top=10,bottom=10) + xlab("ATRA-NONE Delta CS")
+```
+```{r}
+universe = dd.cs$Entrez
+geneList= dd.cs$LFC
+names(geneList) = universe
+enrich = enrich.GSE(geneList = geneList, type = "All")
+```
+
+```{r}
+EnrichedGeneView(as.data.frame(enrich), geneList, keytype = "Entrez")
+```
+
+```{r}
+EnrichedGSEView(as.data.frame(enrich), decreasing = FALSE)
+```
+
+```{r}
+EnrichedGSEView(as.data.frame(enrich), decreasing = TRUE)
+```
+
+
+```{r}
+EnrichedView(as.data.frame(enrich)) + xlab("-log10(p.value)")
+```
+
+##Volcano merge of per lib crispr screen 
+```{r}
+pv = 0.05
+lfc=2
+fpkm=0.5
+```
+
+
+###Day21 Volcano Plot  lib1
+```{r}
+gene_CS <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/09.MAGeCKFlute/result_per_lib/CS_result_Day21_1.txt", sep="\t", header = TRUE)
+gene_CS <- data.frame(Gene=gene_CS[,1], DeltaCS=gene_CS[,2], Pvalue=gene_CS[,5], FDR=p.adjust(gene_CS[,5],method="BH",n=length(gene_CS[,5])), FPKM=gene_CS[,6])
+A3<-VolcanoView(gene_CS, x = "DeltaCS", y = "Pvalue", x_cutoff = log2(lfc), y_cutoff = pv,Label = "Gene",top=10, xlab = "Delta Crispr Score", ylab="Log10(P value)")+xlim(-10,20)+ylim(0,8)+ ggtitle("ATRA Day21 Lib1")
+A3
+cs_pos_d21_1 <- gene_CS[gene_CS$Pvalue < pv & gene_CS$DeltaCS > log2(lfc) & gene_CS$FPKM >fpkm,]
+```
+
+###Day21 Volcano Plot  lib2
+```{r}
+gene_CS <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/09.MAGeCKFlute/result_per_lib/CS_result_Day21_2.txt", sep="\t", header = TRUE)
+gene_CS <- data.frame(Gene=gene_CS[,1], DeltaCS=gene_CS[,2], Pvalue=gene_CS[,5], FDR=p.adjust(gene_CS[,5],method="BH",n=length(gene_CS[,5])), FPKM=gene_CS[,6])
+A4<-VolcanoView(gene_CS, x = "DeltaCS", y = "Pvalue", x_cutoff = log2(lfc), y_cutoff = pv,Label = "Gene",top=10, xlab = "Delta Crispr Score", ylab="Log10(P value)")+xlim(-10,20)+ylim(0,8)+ ggtitle("ATRA Day21 Lib2")
+A4
+cs_pos_d21_2 <- gene_CS[gene_CS$Pvalue < pv & gene_CS$DeltaCS > log2(lfc) & gene_CS$FPKM >fpkm,]
+```
+
+###Day7 Volcano Plot
+```{r}
+gene_CS <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/09.MAGeCKFlute/result_per_lib/CS_result_Day7.txt", sep="\t", header = TRUE)
+gene_CS <- data.frame(Gene=gene_CS[,1], DeltaCS=gene_CS[,2], Pvalue=gene_CS[,5], FDR=p.adjust(gene_CS[,5],method="BH",n=length(gene_CS[,5])), FPKM=gene_CS[,6])
+A1<-VolcanoView(gene_CS, x = "DeltaCS", y = "Pvalue", x_cutoff = log2(lfc), y_cutoff = pv,Label = "Gene",top=10, xlab = "Delta Crispr Score", ylab="Log10(P value)")+xlim(-10,20)+ylim(0,8)+ ggtitle("ATRA Day7")
+A1
+cs_pos_d7 <- gene_CS[gene_CS$Pvalue < pv & gene_CS$DeltaCS > log2(lfc) & gene_CS$FPKM >fpkm,]
+```
+
+###Day14 Volcano Plot
+```{r}
+gene_CS <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/09.MAGeCKFlute/result_per_lib/CS_result_Day14.txt", sep="\t", header = TRUE)
+gene_CS <- data.frame(Gene=gene_CS[,1], DeltaCS=gene_CS[,2], Pvalue=gene_CS[,5], FDR=p.adjust(gene_CS[,5],method="BH",n=length(gene_CS[,5])), FPKM=gene_CS[,6])
+A2<-VolcanoView(gene_CS, x = "DeltaCS", y = "Pvalue", x_cutoff = log2(lfc), y_cutoff = pv,Label = "Gene",top=10, xlab = "Delta Crispr Score", ylab="Log10(P value)")+xlim(-10,20)+ylim(0,8) + ggtitle("ATRA Day14")
+A2
+cs_pos_d14 <- gene_CS[gene_CS$Pvalue < pv & gene_CS$DeltaCS > log2(lfc) & gene_CS$FPKM >fpkm,]
+```
+
+
+```{r}
+plot_grid(A1,A2,A3,A4)
+```
+
+
+```{r}
+library(ChIPseeker)
+library(gplots)
+library(UpSetR)
+vennplot(c(tibble(cs_pos_d7$Gene),tibble(cs_pos_d14$Gene),tibble(cs_pos_d21_1$Gene),tibble(cs_pos_d21_2$Gene)), by = "gplots")
+```
+
+```{r}
+write.table(cs_pos_d7, "/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/09.MAGeCKFlute/result_per_lib/cs_pos_d7.list", row.names = FALSE, col.names = TRUE, quote = FALSE, sep = "\t")
+write.table(cs_pos_d14, "/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/09.MAGeCKFlute/result_per_lib/cs_pos_d14.list", row.names = FALSE, col.names = TRUE, quote = FALSE, sep = "\t")
+write.table(cs_pos_d21_1, "/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/09.MAGeCKFlute/result_per_lib/cs_pos_d21_1.list", row.names = FALSE, col.names = TRUE, quote = FALSE, sep = "\t")
+write.table(cs_pos_d21_2, "/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/09.MAGeCKFlute/result_per_lib/cs_pos_d21_2.list", row.names = FALSE, col.names = TRUE, quote = FALSE, sep = "\t")
+```
+
+
+```{r}
+ccle_up <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/13.CCLE_ATRA_sensitivity/venn/CCLE_RNAseq_ATRA_sensitivity3.up.list", header=TRUE)
+ccle_up$Sensitivity <- 1
+colnames(ccle_up) <- c("Gene", "Sensitivity")
+
+cs_pos_merge<-merge(cs_pos_d7[,1:2], cs_pos_d14[,1:2], by="Gene",all=T)
+cs_pos_merge<-merge(cs_pos_merge,cs_pos_d21_1[,1:2], by="Gene",all=T)
+cs_pos_merge<-merge(cs_pos_merge,cs_pos_d21_2[,1:2], by="Gene",all=T)
+cs_pos_merge<-merge(ccle_up,cs_pos_merge, by="Gene",all=T)
+colnames(cs_pos_merge) <- c("Gene", "Sensitivity","Day7", "Day14", "Day21_1", "Day21_2")
+
+cs_pos_merge[is.na(cs_pos_merge)] <- 0
+cs_pos_merge[cs_pos_merge > 0] <- 1
+
+between <- function(row, set1, set2){
+  newData <- (row[set1] == 1) & (row[set2] == 1)
+}
+
+upset(cs_pos_merge,  
+      queries = list(
+                list(query = intersects, params = list("Sensitivity", "Day7","Day21_1", "Day21_2"), active=T,color=brewer.pal(4,"Set1")[1]), 
+                list(query = intersects, params = list("Sensitivity", "Day14","Day21_1", "Day21_2"), active=T,color=brewer.pal(4,"Set1")[1]),
+                list(query = intersects, params = list("Sensitivity", "Day21_1", "Day21_2"), active=T,color=brewer.pal(4,"Set1")[1]), 
+                list(query = intersects, params = list("Sensitivity", "Day21_1"), active=T,color=brewer.pal(4,"Set1")[1]),
+                list(query = intersects, params = list("Sensitivity", "Day21_2"), active=T,color=brewer.pal(4,"Set1")[1])),
+      matrix.color = brewer.pal(9,"Blues")[6], 
+      main.bar.color =brewer.pal(9,"Blues")[6],
+      sets.bar.color = brewer.pal(5,"Set2"),
+      order.by = "freq")
+```
+
+```{r}
+signor_merge <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/09.MAGeCKFlute/result_signor/CCLE_up_cs_pos_lib1.signor.txt", header=FALSE)
+
+ggplot(signor_merge, aes(x = V1, y=V3)) + geom_boxplot(aes(color=V1)) +  geom_jitter(aes(color=V1),alpha=0.3,size=0.5) + ylab("") + ggtitle("") + xlab("")    + theme(axis.text.x = element_text(angle = 45, hjust = 1.2, vjust = 1.1, size=7))
+```
+
+
+
+##cluster profile GSEA Day7
+###wipipathway input
+```{r}
+#wpgmtfile <- system.file("extdata/wikipathways-20190510-gmt-Homo_sapiens.gmt", package="clusterProfiler")
+wp2gene <- read.gmt("~/Bin/gmt/wikipathways-20190510-gmt-Homo_sapiens.gmt")
+wp2gene <- wp2gene %>% tidyr::separate(ont, c("name","version","wpid","org"), "%")
+wpid2gene <- wp2gene %>% dplyr::select(wpid, gene)
+wpid2name <- wp2gene %>% dplyr::select(wpid, name)
+```
+
+###geneList input
+```{r}
+#d <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/09.MAGeCKFlute/CS_result_Day21.txt", sep="\t", header = TRUE)
+d <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/11.APL_vs_WB/CS_result_Day21.postive.txt", sep="\t", header = TRUE)
+d$Entrez <- TransGeneID(d$Gene, "Symbol", "Entrez", organism = "hsa")
+idx <- is.na(d$Entrez) | duplicated(d$Entrez)
+d <- d[!idx, ]
+#b <- bitr(rownames(d), fromType = "SYMBOL",toType = c("ENTREZID"), OrgDb = org.Hs.eg.db)
+geneList <- d$Gene
+names(geneList) <- as.character(d$Entrez)
+geneList <- sort(geneList, decreasing = TRUE)
+```
+
+###wikipathway enrich analysis
+```{r}
+gene <- names(geneList)[abs(geneList) > log2(1.5)]
+#gene <- bitr(gene, fromType = "SYMBOL",toType = c("ENSEMBL", "ENTREZID"), OrgDb = org.Hs.eg.db)
+#gene <- unique(as.character(gene[,3]))
+ewp <- enricher(gene, TERM2GENE = wpid2gene, TERM2NAME = wpid2name, pvalueCutoff = 0.5)
+ewp <- setReadable(ewp, org.Hs.eg.db, keyType = "ENTREZID")
+head(ewp)
+```
+
+###wikipathway GSEA
+```{r}
+ewp2 <- GSEA(geneList, TERM2GENE = wpid2gene, TERM2NAME = wpid2name, verbose=FALSE, pvalueCutoff = 0.5)
+ewp2 <- setReadable(ewp2, org.Hs.eg.db, keyType = "ENTREZID")
+head(ewp2)
+```
+
+```{r}
+P1<-dotplot(ewp,showCategory=10)
+P2<-dotplot(ewp2,showCategory=10)
+plot_grid(P1,P2)
+cnetplot(ewp2, foldChange=geneList, circular = TRUE, colorEdge = TRUE)
+heatplot(ewp2, foldChange=geneList)
+ridgeplot(ewp2)
+gseaplot(ewp2, geneSetID = 1,title = ewp2$Description[1])
+enrichplot::gseaplot2(ewp2, geneSetID = 1,title = ewp2$Description[1])
+```
+
+
+```{r}
+ego3 <- gseGO(geneList     = geneList,
+              OrgDb        = org.Hs.eg.db,
+              ont          = "BP",
+              nPerm        = 1000,
+              minGSSize    = 100,
+              maxGSSize    = 500,
+              pvalueCutoff = 0.5,
+              verbose      = FALSE)
+
+enrichplot::gseaplot2(ego3, geneSetID = 1:3,title = ego3$Description[1])
+```
+
+
+
+
+##MSigDb analysis
+```{r}
+msigdbr_show_species()
+m_df <- msigdbr(species = "Homo sapiens")
+```
+
+
+
+
+
+##Data quality control
+```{r}
+#FluteRRA(gene_d21_d0, sgrna_d21_d0, prefix="RRA", organism="hsa", lfcCutoff = c(-0.3, 0.3))
+countsummary <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/08.mageck_vispr_20190506/count/NB4_Crispr_screen.countsummary.txt", header = TRUE, sep = "\t")
+C1<-MapRatesView(countsummary)+ theme(legend.position = "none")
+```
+
+
+```{r}
+C2<-IdentBarView(countsummary, x = "Label", y = "GiniIndex", ylab= "Gini index", main = "Evenness of sgRNA reads")
+```
+
+```{r}
+countsummary$Missed = log10(countsummary$Zerocounts)
+C3<-IdentBarView(countsummary, x = "Label", y = "Missed", fill = "#394E80", ylab = "Log10 missed gRNAs", main = "Missed sgRNAs")
+```
+
+
+```{r}
+plot_grid(C1,C2,C3,labels=c("A","B","C"),ncol=1)
+```
+
+
+##rra_NB4_ATRA_Day21-Day21
+```{r}
+sgrna_d21_d0 <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/09.MAGeCKFlute/test/NB4_ATRA_Day21-Day0.sgrna_summary.txt", header = TRUE, sep = "\t")
+gene_d21_d0 <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/09.MAGeCKFlute/test/NB4_ATRA_Day21-Day0.gene_summary.a.txt", header = TRUE, sep = "\t")
+
+dd.rra = ReadRRA(gene_d21_d0, organism = "hsa")
+dd.sgrna = ReadsgRRA(sgrna_d21_d0)
+```
+
+```{r}
+p1 = VolcanoView(dd.rra[,c(1,3,4)], x = "LFC", y = "FDR", Label = "Official", x_cutoff = log2(1.5), y_cutoff = 0.05)
+print(p1)
+```
+
+```{r}
+p2 = sgRankView(dd.sgrna, top = 0 , bottom = 0, gene = c("RARA", "PML", "SEMA4C", "SEC24B", "LRCH2"))
+print(p2)
+```
+```{r}
+geneList= dd.rra$LFC
+names(geneList) = dd.rra$Official
+RankView(geneList,top=5,bottom=5)
+```
+```{r}
+universe = dd.rra$EntrezID
+geneList= dd.rra$LFC
+names(geneList) = universe
+enrich = enrich.GSE(geneList = geneList, type = "All")
+```
+
+```{r}
+EnrichedGeneView(as.data.frame(enrich), geneList, keytype = "Entrez")
+```
+
+```{r}
+EnrichedGSEView(as.data.frame(enrich), decreasing = FALSE)
+```
+
+```{r}
+EnrichedGSEView(as.data.frame(enrich), decreasing = TRUE)
+```
+
+
+```{r}
+EnrichedView(as.data.frame(enrich))
+```
+
+##MLE
+```{r}
+data("mle.gene_summary")
+ctrlname = c("dmso")
+treatname = c("plx")
+#Read beta scores from gene summary table in MAGeCK MLE results
+dd=ReadBeta(mle.gene_summary, organism="hsa")
+head
+ctrlname = c("dmso")
+treatname = c("plx")
+#Read beta scores from gene summary table in MAGeCK MLE results
+dd=ReadBeta(mle.gene_summary, organism="hsa")
+head(dd)
+```
+
+##rra_Venetoclax_Day8-Day8
+```{r}
+sgrna_d8_d8 <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/10.test_Venetoclax/rra_Venetoclax_Day8-Day8/rra_Venetoclax_Day8-Day8.sgrna_summary.txt", header = TRUE, sep = "\t")
+gene_d8_d8 <-  read.table("/Users/liuyabin/Desktop/Wang_Lab/project/20.Crispr_screen/10.test_Venetoclax/rra_Venetoclax_Day8-Day8/rra_Venetoclax_Day8-Day8.gene_summary2.txt", header = TRUE, sep = "\t")
+
+dd.rra = ReadRRA(gene_d8_d8, organism = "hsa")
+dd.sgrna = ReadsgRRA(sgrna_d8_d8)
+```
+
+```{r}
+p1 = VolcanoView(dd.rra, x = "LFC", y = "FDR", Label = "Official", x_cutoff = log2(1.5), y_cutoff = 0.05, ylab = "-lg(p-value)")
+print(p1)
+```
+```{r}
+p2 = sgRankView(dd.sgrna, top = 0, bottom = 0, gene = c("BAX", "PMAIP1", "TP53", "MCL1", "MDM2", "RTN4IP1", "CLPB", "SLC25A1", "Non-Targeting Control" ))
+print(p2)
+```
+```{r}
+geneList= dd.rra$LFC
+names(geneList) = dd.rra$Official
+RankView(geneList,top=5,bottom=5)
+```
+```{r}
+universe = dd.rra$EntrezID
+geneList= dd.rra$LFC
+names(geneList) = universe
+enrich = enrich.GSE(geneList = geneList, type = "All")
+```
+
+```{r}
+EnrichedGeneView(as.data.frame(enrich), geneList, keytype = "Entrez")
+```
+
+```{r}
+EnrichedGSEView(as.data.frame(enrich), decreasing = FALSE)
+```
+
+```{r}
+EnrichedGSEView(as.data.frame(enrich), decreasing = TRUE)
+```
+
+
+```{r}
+EnrichedView(as.data.frame(enrich))
+```

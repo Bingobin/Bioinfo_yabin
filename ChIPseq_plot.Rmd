@@ -1,0 +1,1292 @@
+---
+title: "ChIPseq_plot"
+author: "Yabin Liu"
+date: "2020/9/4"
+output: html_document
+---
+
+```{r}
+source("/Volumes/TCGA-2/lyb_proj_20200717/lyb_function.R")
+```
+
+
+##Part I: H3K27ac signal and number stat
+###01.Super Enhance vs Typical Enhance
+```{r}
+h3k27ac_stat <- read.table("/Volumes/TCGA-2/APL_H3K27ac_WangLab/03.SuperEnhancer/APL_all_enhancer.stat", header = TRUE)
+h3k27ac_stat$Type <- factor(h3k27ac_stat$Type, levels = c("TE", "SE"))
+
+median(h3k27ac_stat[h3k27ac_stat$Type == "TE",]$Median)
+median(h3k27ac_stat[h3k27ac_stat$Type == "SE",]$Median)
+
+median(h3k27ac_stat[h3k27ac_stat$Type == "TE",]$Num)
+median(h3k27ac_stat[h3k27ac_stat$Type == "SE",]$Num)
+
+ggplot(h3k27ac_stat, aes(x = Sample, y=Num, fill=Type)) + 
+  geom_bar(stat = 'identity', position = "fill") + xlab("") + 
+  ylab("") + ggtitle("") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1.2, vjust = 1.1, size=10)) +
+  blank + 
+  scale_fill_manual(values=c("grey","#FB8072"),  na.translate=TRUE, na.value="grey")
+
+ggplot(h3k27ac_stat, aes(x = Sample, y=Singal, fill=Type)) +
+  geom_bar(stat = 'identity', position = "fill") + 
+  xlab("") + ylab("") + ggtitle("") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1.2, vjust = 1.1, size=10)) + 
+  blank +
+  scale_fill_manual(values=c("grey","#FB8072"),  na.translate=TRUE, na.value="grey")
+```
+
+```{r}
+ggplot(h3k27ac_stat, aes(x = Type, y=Num)) + geom_boxplot(aes(color=Type), outlier.shape = NA) +  geom_jitter(aes(color=Type),alpha=1,size=1) + ylab("") + ggtitle("") + xlab("")  + scale_color_manual(values=c(brewer.pal(n = 9, name ="Set1")[2], brewer.pal(n = 9, name ="Set1")[1])) + scale_y_log10() + blank
+
+ggplot(h3k27ac_stat, aes(x = Type, y=Median)) + geom_boxplot(aes(color=Type), outlier.shape = NA) +  geom_jitter(aes(color=Type),alpha=1,size=1) + ylab("") + ggtitle("") + xlab("")  + scale_color_manual(values=c(brewer.pal(n = 9, name ="Set1")[2], brewer.pal(n = 9, name ="Set1")[1])) + scale_y_log10() + blank 
+```
+
+```{r}
+h3k27ac_freq <- read.table("/mnt5/APL_H3K27ac_WangLab/03.SuperEnhancer/APL_freq.txt", header = TRUE)
+h3k27ac_freq$Type <- factor(h3k27ac_freq$Type, levels = c("Peaks", "TE", "SE"))
+h3k27ac_freq$Recur <- factor(h3k27ac_freq$Recur, levels = c("1-2", "3-4", "5-6", ">6"))
+
+
+ggplot(h3k27ac_freq, aes(x = Recur, y=Freq, fill=Type)) + 
+  geom_bar(stat = 'identity', position = "dodge", width = 0.5) + 
+  xlab("") + ylab("") + ggtitle("freq") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1.2, vjust = 1.1, size=7), plot.title = element_text(hjust = 0.5)) +
+  blank + 
+  scale_fill_manual(values=c( "grey","#80B1D3","#FB8072"),  na.translate=TRUE, na.value="grey")
+```
+###02. Peak postion stat per sample
+```{r}
+library(forcats)
+library(ggpubr)
+library(RColorBrewer)
+library(cowplot)
+library(dplyr)
+#peak_posi_stat <- read.table("/mnt5/APL_H3K27ac_WangLab/07.annot_peaks/APL_H3K27ac.posi.stat", header = TRUE, sep = "\t", quote = "")
+peak_posi_stat <- read.table("/mnt5/APL_H3K27ac_WangLab/02.callpeak/06.annot_peaks/APL_H3K27ac.posi.stat", header = TRUE, sep = "\t", quote = "")
+
+sample.list <- unique(peak_posi_stat$Sample)
+pie.plot.ls <- lapply(sample.list,function(sample){
+#sample = "CHH"
+  df.pie <- peak_posi_stat[peak_posi_stat$Sample == sample,]
+  df.pie$Percentage <-  paste(round(df.pie$Number / sum(df.pie$Number)*100,2),"%")
+  df.pie <- data.table::as.data.table(df.pie)
+  df.pie[,`:=`(TypeII, paste0(Type,"(",Percentage,")"))]
+#  df.pie$Type <-  fct_reorder(df.pie$Type, -df.pie$Number)
+  df.pie$Type <- factor(df.pie$Type,levels = c("intron","promoter-TSS","Intergenic","exon","TTS","5'UTR","non-coding","3'UTR"))
+  ggdonutchart(df.pie, "Number", label = "Percentage", fill = "Type",
+               color = "white",lab.pos = "out", 
+               lab.font = c("black","blod",5)) + 
+    theme(plot.title=element_text(hjust = 0.5), 
+          legend.title = element_blank())  + 
+    scale_fill_manual(values = brewer.pal(12,"Paired")[c(1,2,3,4,5,7,8,9)]) + 
+    ggtitle(sample) 
+})
+pie.plot.ls
+
+pdf("~/kaka_3.pdf",width=10, height=10)
+plot_grid(plotlist=pie.plot.ls)
+dev.off()
+```
+
+```{r}
+peak_posi_stat.2 <- peak_posi_stat %>% group_by(Sample) %>% summarise(Sum=sum(Number))
+sam.leverls <- peak_posi_stat.2[rev(sort(peak_posi_stat.2$Sum,index.return=TRUE)$ix),]$Sample
+peak_posi_stat$Sample <- factor(peak_posi_stat$Sample, levels = sam.leverls)
+
+peak_posi_stat$Type <- factor(peak_posi_stat$Type,levels = rev(c("intron","Intergenic","promoter-TSS","TTS", "non-coding", "exon","5'UTR","3'UTR")))
+
+kaka_10 <- ggplot(peak_posi_stat, aes(x=Sample, y = Number, fill=Type)) + geom_col(position = "fill") + blank + scale_fill_manual(values = rev(brewer.pal(12,"Paired")[c(1,2,3,4,7,8,5,9)]))
+
+peak_posi_stat.sum <- peak_posi_stat %>% group_by(Sample) %>% summarise(Num=sum(Number))
+
+kaka_10 + geom_text(aes(label=Number),position=position_fill(vjust = 0.5), color="black",size=1) + theme(legend.position = "top")
+
+pdf("~/kaka_10.pdf",width=8, height=6)
+kaka_10 + geom_text(aes(label=Number),position=position_fill(vjust = 0.5), color="black",size=4) + theme(legend.position = "top")
+dev.off()
+```
+
+
+
+##Part II: H3K27ac rank plot
+
+###01.rank enhancer by single sample 
+```{r}
+enhancer_signal <- read.table("/mnt5/APL_H3K27ac_WangLab/03.SuperEnhancer/CHH_H3K27ac_ROSE/CHH_H3K27ac_peaks_AllEnhancers_ENHANCER_TO_GENE.txt", header = FALSE, sep = "\t")
+
+enhancer_signal$Type[enhancer_signal$V14 == 1] = "SE"
+enhancer_signal$Type[enhancer_signal$V14 == 0] = "TE"
+
+sample = "CHH"
+
+
+p<-ggplot(enhancer_signal, aes(x = V13/1000, y= V7-V8)) + 
+  geom_jitter(aes(color=Type), alpha=1,size=0.5)  + 
+  xlab("Rank/1000") + ylab("Enhancer signal") + ggtitle(paste0(sample," H3K27ac")) +
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  blank +
+  scale_color_manual(values=c(brewer.pal(n = 9, name ="Set1")[1], brewer.pal(n = 9, name ="Set1")[9])) +
+  geom_vline(xintercept=nrow(enhancer_signal[enhancer_signal$Type == "SE", ])/1000,lty=4,col="black",lwd=0.8)
+
+labelname2 <- c("RARA", "CEBPE", "BRD4", "RXRA", "PML", "ETV6", "ING3", "SPI1", "WT1","ZMIZ1", "IKZF1", "IRF2BP2")
+
+p + ggrepel::geom_label_repel(data = enhancer_signal[enhancer_signal$V12 %in% labelname2,],
+                              aes(x = V13/1000, y = V7-V8, label = V12, fill = Type), 
+                              fontface = "bold", size = 2.5, 
+                              box.padding = unit(1, "lines"), 
+                              segment.color = brewer.pal(n = 9, name ="Set1")[2], 
+                              point.padding = unit(0.3, "lines"), 
+                              segment.size = 0.3, show.legend = FALSE, 
+                              label.r = 0.5, nudge_x = 0, nudge_y = 0)  + 
+  scale_fill_manual(values=c(brewer.pal(n = 9, name ="Set3")[4], brewer.pal(n = 9, name ="Set3")[9])) 
+```
+
+###02.rank enhancer by combind sample
+```{r}
+enhancer_rank.combind <- read.table("/mnt5/APL_H3K27ac_WangLab/03.SuperEnhancer/APL_enhancer.rank.txt", header = TRUE, sep = "\t")
+enhancer_rank.combind[enhancer_rank.combind$Signal < 0,]$Signal <- 0
+#sig_gene <- c("RARA", "CEBPE", "BRD4", "RXRA", "PML", "ETV6", "ING3", "SPI1", "WT1","ZMIZ1", "IKZF1", "IRF2BP2")
+```
+
+```{r}
+#sig_gene <- c("WT1","SP140", "GZMA", "PM20D1","PIFR", "PYHIN1", "DNAI2", "CYP4F22", "ZNF683", "PRF1")
+sig_gene <- c("SPI1", "IRF1", "MYB","RUNX1", "RARA", "GFI1")
+sample <- "CHH"
+top <- 1
+enhancer_rank_plot(sig_gene, sample, top, enhancer_rank.combind)
+```
+
+
+```{r}
+plot.ls <- lapply(unique(enhancer_rank.combind$Sample), function(x){
+  enhancer_rank_plot(sig_gene, x, top, enhancer_rank.combind)
+})
+plot_grid(plotlist = plot.ls)
+
+pdf("~/kaka_14.pdf",width = 10, height = 8,useDingbats=FALSE)
+plot_grid(plotlist = plot.ls)
+dev.off()
+```
+
+###03.CD34 enhancer rank plot 
+```{r}
+sig_gene <- "IKZF1"
+```
+
+
+```{r}
+cd34_rank.combind <- read.table("/mnt5/AML_H3K27ac_3ref/03.SuperEnhancer/CD34_enhancer.rank.txt", header = TRUE, sep = "\t")
+cd34_rank.combind[cd34_rank.combind$Signal < 0,]$Signal <- 0
+```
+
+```{r}
+plot.ls <- lapply(unique(cd34_rank.combind$Sample), function(x){
+  enhancer_rank_plot(sig_gene, x, 5, cd34_rank.combind)
+})
+#plot_grid(plotlist = plot.ls)
+pdf("~/eiei_1.pdf",width = 6, height = 4,useDingbats=FALSE)
+plot.ls
+dev.off()
+```
+
+```{r}
+aml_rank.combind <- read.table("/Volumes/TCGA-2/AML_H3K27ac_RNAseq_CancerCell2017/03.SuperEnhancer/AML_enhancer.rank.txt", header = TRUE, sep = "\t")
+aml_rank.combind[aml_rank.combind$Signal < 0,]$Signal <- 0
+```
+
+```{r}
+plot.ls <- lapply(unique(aml_rank.combind$Sample), function(x){
+  enhancer_rank_plot(sig_gene, x, 1, aml_rank.combind)
+})
+
+pdf("~/eiei_2.pdf",width = 6, height = 4,useDingbats=FALSE)
+plot.ls
+dev.off()
+```
+
+##Part III: Enhancer RPKM based on Genehancer database 
+###01 APL Enhancer RPKM process
+```{r}
+enhancer_rpkm <- read.table("/mnt5/APL_H3K27ac_WangLab/05.merge_rpkm/APL_H3K27ac.fpkm.txt", header=TRUE, row.names = 1, stringsAsFactors = FALSE, quote = "", sep = "\t")
+enhancer_rpkm.in <- read.table("/mnt5/APL_H3K27ac_WangLab/05.merge_rpkm/APL_H3K27ac.IN.fpkm.txt", header=TRUE, row.names = 1, stringsAsFactors = FALSE, quote = "", sep = "\t")
+enhancer_rpkm.anno <- enhancer_rpkm[enhancer_rpkm$Length > 500,1:3]
+enhancer_rpkm.matrix <- as.matrix(enhancer_rpkm[4:ncol(enhancer_rpkm)])
+enhancer_rpkm.in.matrix <- as.matrix(enhancer_rpkm.in[4:ncol(enhancer_rpkm)])
+
+enhancer_rpkm.matrix.f <- enhancer_rpkm.matrix - enhancer_rpkm.in.matrix
+enhancer_rpkm.matrix.f[enhancer_rpkm.matrix.f < 0] <- 0
+enhancer_rpkm.matrix <- enhancer_rpkm.matrix.f[rowMeans(enhancer_rpkm.matrix.f) > 10 & rowSums(enhancer_rpkm.matrix.f > 5) > 3,]
+
+enhancer_rpkm.df <- merge(enhancer_rpkm.anno, enhancer_rpkm.matrix, by.x = 0, by.y = 0, all = FALSE)
+enhancer_rpkm.df$Mean <- rowMeans(enhancer_rpkm.df[,5:ncol(enhancer_rpkm.df)])
+enhancer_rpkm.df$Rank <- rank(-enhancer_rpkm.df$Mean)
+enhancer_rpkm.df %>% arrange(Rank)
+row.names(enhancer_rpkm.df) <- enhancer_rpkm.df$Row.names
+enhancer_rpkm.df["GH11J032420",]
+write.table(enhancer_rpkm.df,"/mnt5/APL_H3K27ac_WangLab/05.merge_rpkm/APL_H3K27ac_GH.fpkm.conserved.txt",sep = "\t", quote = FALSE, row.names = FALSE)
+```
+
+```{r}
+enhancer_rpkm.anno <- read.table("/mnt5/APL_H3K27ac_WangLab/05.merge_rpkm/APL_H3K27ac_GH.fpkm.conserved.anno.txt", header=TRUE, row.names = 1, stringsAsFactors = FALSE, quote = "", sep = "\t")
+```
+```{r}
+gene.list <- unique(na.omit(enhancer_rpkm.anno$Entrez.ID))
+Enricher <- enrich_combind(gene.list,0.5,0.5)
+```
+```{r}
+enricher_plot(Enricher,1:10,1:10,1:10,1:10,1:10,5) + ggtitle("APL H3K27ac")
+```
+```{r}
+enhancer_rpkm.anno$Type<-(sapply(enhancer_rpkm.anno$Annotation,function(x){strsplit(x," \\(")[[1]][1]}))
+df.pie <- enhancer_rpkm.anno %>% group_by(Type) %>% summarise(Num=n(),Pro=round(n()/nrow(enhancer_rpkm.anno)*100,1))
+df.pie$labs <- paste(df.pie$Pro, "%")
+df.pie <- data.table::as.data.table(df.pie)
+df.pie[,`:=`(TypeII, paste0(Type,"(",labs,")"))]
+df.pie$TypeII <-  fct_reorder(df.pie$TypeII, -df.pie$Num)
+ggdonutchart(df.pie, "Num", label = "TypeII", fill = "TypeII",color = "white",lab.pos = "out", lab.font = c("black","blod",5)) + theme(legend.position = "right")  + scale_fill_manual(values = brewer.pal(12,"Paired")[c(1,2,3,4,5,7,8,9)])
+```
+
+
+###02 CD34+ Enhancer RPKM process
+```{r}
+CD34_rpkm <- read.table("/mnt5/AML_H3K27ac_3ref/05.merge_rpkm/CD34_H3K27ac.fpkm.txt", header=TRUE, row.names = 1, stringsAsFactors = FALSE, quote = "", sep = "\t")
+CD34_rpkm.in <- read.table("/mnt5/AML_H3K27ac_3ref/05.merge_rpkm/CD34_H3K27ac.IN.fpkm.txt", header=TRUE, row.names = 1, stringsAsFactors = FALSE, quote = "", sep = "\t")
+CD34_rpkm.anno <- CD34_rpkm[CD34_rpkm$Length > 500,1:3]
+CD34_rpkm.matrix <- as.matrix(CD34_rpkm[4:ncol(CD34_rpkm)])
+CD34_rpkm.in.matrix <- as.matrix(CD34_rpkm.in[4:ncol(CD34_rpkm)])
+
+CD34_rpkm.matrix.f <- CD34_rpkm.matrix - CD34_rpkm.in.matrix
+CD34_rpkm.matrix.f[CD34_rpkm.matrix.f < 0] <- 0
+CD34_rpkm.matrix <- CD34_rpkm.matrix.f[rowMeans(CD34_rpkm.matrix.f) > 10 & rowSums(CD34_rpkm.matrix.f > 5) > 3,]
+
+CD34_rpkm.df <- merge(CD34_rpkm.anno, CD34_rpkm.matrix, by.x = 0, by.y = 0, all = FALSE)
+CD34_rpkm.df$Mean <- rowMeans(CD34_rpkm.df[,5:ncol(CD34_rpkm.df)])
+CD34_rpkm.df$Rank <- rank(-CD34_rpkm.df$Mean)
+CD34_rpkm.df %>% arrange(Rank)
+row.names(CD34_rpkm.df) <- CD34_rpkm.df$Row.names
+CD34_rpkm.df["GH11J032420",]
+write.table(CD34_rpkm.df,"/mnt5/AML_H3K27ac_3ref/05.merge_rpkm/CD34_H3K27ac_GH.fpkm.conserved.txt",sep = "\t", quote = FALSE, row.names = FALSE)
+```
+
+```{r}
+CD34_rpkm.anno <- read.table("/mnt5/AML_H3K27ac_3ref/05.merge_rpkm/CD34_H3K27ac_GH.fpkm.conserved.anno.txt", header=TRUE, row.names = 1, stringsAsFactors = FALSE, quote = "", sep = "\t")
+```
+
+```{r}
+gene.cd34.list <- unique(na.omit(CD34_rpkm.anno$Entrez.ID))
+Enricher.cd34 <- enrich_combind(gene.list,0.5,0.5)
+```
+
+```{r}
+enricher_plot(Enricher.cd34,1:10,1:10,1:10,1:10,1:10,5) + ggtitle("CD34+ H3K27ac")
+```
+
+```{r}
+CD34_rpkm.anno$Type<-(sapply(CD34_rpkm.anno$Annotation,function(x){strsplit(x," \\(")[[1]][1]}))
+df.pie <- CD34_rpkm.anno %>% group_by(Type) %>% summarise(Num=n(),Pro=round(n()/nrow(enhancer_rpkm.anno)*100,1))
+df.pie$labs <- paste(df.pie$Pro, "%")
+df.pie <- data.table::as.data.table(df.pie)
+df.pie[,`:=`(TypeII, paste0(Type,"(",labs,")"))]
+df.pie$TypeII <-  fct_reorder(df.pie$TypeII, -df.pie$Num)
+df.pie$TypeII <- factor(df.pie$TypeII, levels = c("intron(25.1 %)","promoter-TSS(33.7 %)", "Intergenic(4.9 %)", "exon(4.5 %)", "5' UTR(3.5 %)", "non-coding(2 %)", "TTS(1.4 %)", "3' UTR(0.2 %)"))
+ggdonutchart(df.pie, "Num", label = "TypeII", fill = "TypeII",color = "white",lab.pos = "out", lab.font = c("black","blod",5)) + theme(legend.position = "right")  + scale_fill_manual(values = brewer.pal(12,"Paired")[c(1,2,3,4,5,7,8,9)])
+```
+
+
+```{r}
+write.table(APL_rpkm.anno[enhancer.APL_CD34,1:3], "/mnt5/APL_H3K27ac_WangLab/09.APL_CD34_process/Enhancer.APL_CD34.bed",row.names = TRUE, quote = FALSE, sep = "\t")
+write.table(CD34_rpkm.anno[enhancer.CD34.uniq,1:3], "/mnt5/APL_H3K27ac_WangLab/09.APL_CD34_process/Enhancer.CD34_uniq.bed",row.names = TRUE, quote = FALSE, sep = "\t")
+write.table(APL_rpkm.anno[enhancer.APL.uniq,1:3], "/mnt5/APL_H3K27ac_WangLab/09.APL_CD34_process/Enhancer.APL_uniq.bed",row.names = TRUE, quote = FALSE, sep = "\t")
+```
+
+
+###03. APL and CD34 conserved enhancer combind
+```{r}
+APL_rpkm.anno <- enhancer_rpkm.anno
+combind.df <- merge(APL_rpkm.anno[,15, drop=FALSE], CD34_rpkm.anno[,15, drop=FALSE], by.x=0, by.y=0, all=TRUE)
+combind.df[is.na(combind.df)] <- 0
+colnames(combind.df) <- c("Enhancer_ID", "APL", "CD34")
+combind.df[combind.df$APL != 0,]$APL <- 1
+combind.df[combind.df$CD34 != 0,]$CD34 <- 1
+as.data.frame(table(apply(X = combind.df[, c("APL","CD34"), drop = FALSE], 1, paste, collapse = "")))
+```
+```{r}
+pdf("~/tmp.pdf")
+gplots::venn(list(APL=rownames(APL_rpkm.anno),CD34=rownames(CD34_rpkm.anno)))
+dev.off()
+```
+
+
+```{r}
+combind.df <- data.table::as.data.table(combind.df)
+enhancer.APL_CD34 <- combind.df[.("1","1"),on=c("APL","CD34"),Enhancer_ID]
+enhancer.CD34.uniq <- combind.df[.("0","1"),on=c("APL","CD34"),Enhancer_ID]
+enhancer.APL.uniq <- combind.df[.("1","0"),on=c("APL","CD34"),Enhancer_ID]
+
+gene.APL_CD34 <- unique(na.omit(APL_rpkm.anno[enhancer.APL_CD34,]$Entrez.ID))
+gene.CD34.uniq <- unique(na.omit(CD34_rpkm.anno[enhancer.CD34.uniq,]$Entrez.ID))
+gene.APL.uniq <- unique(na.omit(APL_rpkm.anno[enhancer.APL.uniq,]$Entrez.ID))
+
+gene.APL_CD34.symbol <- unique(na.omit(APL_rpkm.anno[enhancer.APL_CD34,]$Gene.Name))
+gene.CD34.uniq.symbol <- unique(na.omit(CD34_rpkm.anno[enhancer.CD34.uniq,]$Gene.Name))
+gene.APL.uniq.symbol <- unique(na.omit(APL_rpkm.anno[enhancer.APL.uniq,]$Gene.Name))
+```
+
+```{r}
+Enricher.APL_CD34   <- enrich_combind(gene.APL_CD34,0.5,0.5)
+Enricher.CD34.uniq  <- enrich_combind(gene.CD34.uniq,0.5,0.5)
+Enricher.APL.uniq   <- enrich_combind(gene.APL.uniq,0.5,0.5)
+```
+
+```{r}
+enricher_plot(Enricher.APL_CD34,1:5,1:5,1:5,1:5,1:5,5) + ggtitle("APL & CD34 H3K27ac")
+enricher_plot(Enricher.CD34.uniq,1:5,1:5,1:5,1:5,1:5,5) + ggtitle("CD34 uniq H3K27ac")
+enricher_plot(Enricher.APL.uniq,1:5,1:5,1:5,1:5,1:5,5) + ggtitle("APL uniq  H3K27ac")
+```
+
+
+###04. ekg interest pw display
+```{r}
+ekg.APL_CD34 <- Enricher.APL_CD34$ekg
+ekg.APL.uniq <- Enricher.APL.uniq$ekg
+ekg.CD34.uniq <- Enricher.CD34.uniq$ekg
+ekg.interest.pw <- c("hsa03013", "hsa03040", "hsa04218", "hsa03015", "hsa04722", "hsa05221", "hsa04140", "hsa05202", "hsa05220","hsa04144","hsa05166", "hsa03050", "hsa04919","hsa05014","hsa05016")
+index1 <- match(ekg.interest.pw, ekg.APL_CD34$ID)
+index2 <- match(ekg.interest.pw, ekg.APL.uniq$ID)
+index3 <- match(ekg.interest.pw, ekg.CD34.uniq$ID)
+```
+```{r}
+#ekg.pw.combind <- data.frame(row.names = ekg.interest.pw,KEGG = ekg.APL_CD34[index1, "Description"], APL_CD34 = ekg.APL_CD34[index1, "pvalue"],APL_uniq = ekg.APL.uniq[index2, "pvalue"], CD34_uniq = ekg.CD34.uniq[index3,"pvalue"])
+ekg.pw1<-data.frame(KEGG = ekg.APL_CD34[index1, "Description"], Pvalue = ekg.APL_CD34[index1, "pvalue"],Type = rep("APL_CD34",length(ekg.interest.pw)))
+ekg.pw2<-data.frame(KEGG = ekg.APL.uniq[index2, "Description"], Pvalue = ekg.APL.uniq[index2, "pvalue"], Type = rep("APL_uniq",length(ekg.interest.pw)))
+ekg.pw3<-data.frame(KEGG = ekg.CD34.uniq[index3, "Description"], Pvalue = ekg.CD34.uniq[index3, "pvalue"], Type = rep("CD34_uniq",length(ekg.interest.pw)))
+ekg.pw.combind <- rbind(ekg.pw1, ekg.pw2)
+ekg.pw.combind <- rbind(ekg.pw.combind, ekg.pw3)
+
+ekg.pw.combind[-log(ekg.pw.combind$Pvalue) > 16,]$Pvalue <- exp(-16)
+ekg.pw.combind$KEGG <- factor(ekg.pw.combind$KEGG, levels = as.character(ekg.pw.combind$KEGG[1:length(ekg.interest.pw)]))
+```
+```{r}
+pdf("~/kegg.pdf",width = 10,height = 5)
+ggplot(ekg.pw.combind, aes(y=Type,x=KEGG)) + 
+  geom_point(aes(color=-log(Pvalue)),size=10) + 
+  blank + 
+  theme(panel.border = element_rect(linetype = 1, size = 1, fill = NA))  +
+  theme(axis.line = element_blank(), axis.ticks = element_blank(), axis.text.x = element_text(angle = 30, hjust = 1,vjust = 1)) +
+  xlab("") + ylab("") +
+  scale_colour_gradient(low = brewer.pal(9,"Greens")[1],high = brewer.pal(9,"Greens")[9])
+dev.off()
+```
+
+###05. BOXplot for  AML PW genes
+```{r}
+#ekg.APL_CD34["hsa05221",]$geneID
+aml.pw.gene <- c(strsplit(ekg.APL.uniq["hsa05221",]$geneID,"/")[[1]],"WT1")
+ego.CD34.uniq<-Enricher.CD34.uniq$ego_bp
+cd34.pw.gene <- strsplit(ego.CD34.uniq[c("GO:0002244","GO:0060218"),]$geneID, "/")[[1]]
+
+
+aml.pw.gene <- c("STAT5A","RUNX1", "CEBPA", "PML","AKT1", "MPO", "WT1")
+cd34.pw.gene <- c("SOX4","ARID1B", "TCF12", "PSME3","ZFAT","PSMB4","HERC6")
+
+#APL_rpkm.anno[enhancer.APL_CD34,"Gene.Name",drop = FALSE]
+#CD34_rpkm.anno[enhancer.CD34.uniq,"Gene.Name",drop = FALSE]
+#APL_rpkm.anno[enhancer.APL.uniq,"Gene.Name",drop = FALSE]
+aml.pw.gene.df<-APL_rpkm.anno[match(aml.pw.gene, APL_rpkm.anno$Gene.Name),c("Distance.to.TSS","Gene.Name")]
+
+cd34.pw.gene.df<-CD34_rpkm.anno[match(cd34.pw.gene, CD34_rpkm.anno$Gene.Name),c("Distance.to.TSS","Gene.Name")]
+
+aml.pw.gene.df <- rbind(aml.pw.gene.df, cd34.pw.gene.df)
+```
+
+```{r}
+#index_aml <-match(row.names(aml.pw.gene.df), row.names(enhancer_rpkm.matrix.f))
+#match(row.names(aml.pw.gene.df), row.names(CD34_rpkm.matrix.f))
+#enhancer_rpkm.matrix.f[index_aml,]
+#CD34_rpkm.matrix.f[index_aml,]
+
+plot.list <- lapply(row.names(aml.pw.gene.df), function(x){
+  if( aml.pw.gene.df[x,][1] > 0){
+  title = paste0(aml.pw.gene.df[x,][2],":TSS+", aml.pw.gene.df[x,][1])}
+  else{title = paste0(aml.pw.gene.df[x,][2],":TSS", aml.pw.gene.df[x,][1])}
+
+  gg1 <- data.frame(RPKM = enhancer_rpkm.matrix.f[x,],Type = rep("APL",ncol(enhancer_rpkm.matrix.f)))
+  gg2 <- data.frame(RPKM = CD34_rpkm.matrix.f[x,],Type = rep("CD34+",ncol(CD34_rpkm.matrix.f)))
+  
+  pv<-wilcox.test(gg1$RPKM,gg2$RPKM)$p.value
+  if (pv < 0.05 & pv > 0.01){sig="*"}else if(pv < 0.01 & pv > 0.001){sig="**"}else if(pv < 0.001 & pv > 0.0001){sig="***"}else if(pv < 0.0001){sig="****"}else{sig="-"}
+  
+  gg <- rbind(gg1,gg2)
+  ggplot(gg,aes(x=Type,y=log2(RPKM+1))) + geom_boxplot(color=c("#F15A24","#0071BC"), fill = c("#F15A24","#0071BC"), alpha = 0.65)  +  ggtitle("")  + xlab(title) +  ylab("") +
+  #annotate("text",label=sig, y=5.5, x=1.5,size=5) + ylim(0,6) +
+  stat_compare_means(show.legend = FALSE, comparisons = list(c("APL","CD34+"))) +
+  blank + theme(axis.ticks.x = element_blank(), axis.text.x = element_blank(), plot.title = element_text(hjust = 0.5))
+})
+```
+```{r}
+pdf("~/tmp.pdf", width=20, height = 5)
+plot_grid(plotlist = plot.list,nrow = 1)
+dev.off()
+```
+
+```{r}
+plot.list
+```
+
+
+
+##Part IV: H3K27ac peak hist plot 
+
+###01. APL H3K27ac TSS mode hist plot
+```{r}
+hist.df <-read.table("/mnt5/APL_H3K27ac_WangLab/07.annot_peaks/APL_H3K27ac.hist.txt",header = TRUE,sep = "\t",quote = "")
+```
+
+```{r}
+#pdf("PRandBRD4_in_PR_hist.pdf", width = 6, height = 4)
+ggplot(hist.df,aes(x=Postion,y=Coverage,color=Sample)) + 
+    geom_line(size=0.8) + blank + ylab("TagDensity") +
+    theme(legend.justification = c("right", "top"), legend.position = c(1,1),legend.title = element_blank(),legend.text = element_text(size=10)) + 
+    scale_x_continuous(breaks=c(-3000, -2000,-1000,0, 1000, 2000, 3000),labels=c("-3000","-2000","-1000","TSS","1000","2000","3000")) +
+    geom_vline(xintercept= 0,linetype=5) +
+    scale_color_manual(values=brewer.pal(9,"Paired")) +
+    theme(panel.border = element_rect(linetype = 1, size = 1, fill = NA), axis.line = element_blank(),axis.ticks.x = element_line(size=0.5)) + 
+    theme(legend.background = element_rect(fill=NA), legend.key = element_rect(fill=NA)) +
+    theme(axis.text = element_text(size=10,color="black"))
+#dev.off()
+```
+
+```{r}
+hist.df.tmp <-read.table("/mnt5/APL_H3K27ac_WangLab/02.callpeak/04.SE_rose/CHH_H3K27ac_ROSE/tmpD.txt",header = TRUE,sep = "\t",quote = "")
+
+hist.df.tmp <-read.table("/mnt5/APL_H3K27ac_WangLab/02.callpeak/04.SE_rose/CHH_H3K27ac_ROSE/CHH_peaks_Gateway.merge.hist.txt",header = TRUE,sep = "\t",quote = "")
+
+
+ggplot(hist.df.tmp,aes(x=Postion,y=Coverage,color=Sample)) + 
+    geom_line(size=0.8) + blank + ylab("TagDensity") +
+    theme(legend.justification = c("right", "top"), legend.position = c(1,1),legend.title = element_blank(),legend.text = element_text(size=10)) + 
+#    scale_x_continuous(breaks=c(-3000, -2000,-1000,0, 1000, 2000, 3000),labels=c("-3000","-2000","-1000","0","1000","2000","3000")) +
+    geom_vline(xintercept= 0,linetype=5) +
+#    scale_color_manual(values=brewer.pal(9,"Paired")) +
+    theme(panel.border = element_rect(linetype = 1, size = 1, fill = NA), axis.line = element_blank(),axis.ticks.x = element_line(size=0.5)) + 
+    theme(legend.background = element_rect(fill=NA), legend.key = element_rect(fill=NA)) +
+    theme(axis.text = element_text(size=10,color="black")) 
+```
+
+###02. APL in APL and CD34+ H3K27ac specificity GeneHancer hist plot
+```{r}
+hist.diff.df <-read.table("/mnt5/APL_H3K27ac_WangLab/09.APL_CD34_process/APL_H3K27ac.DIFF.hist.txt",header = TRUE,sep = "\t",quote = "")
+hist.diff.df  %>% group_by(Sample) %>% summarise(n())
+```
+
+```{r}
+#pdf("PRandBRD4_in_PR_hist.pdf", width = 6, height = 4)
+#gg <- hist.diff.df[hist.diff.df$Sample == "RJQ",]
+p1 <- ggplot(hist.diff.df,aes(x=Postion,y=Coverage,color=Type)) + 
+    geom_line(size=0.8,alpha = 0.5) + blank + ylab("TagDensity") +
+    theme(legend.justification = c("right", "top"), legend.position = c(1,1),legend.title = element_blank(),legend.text = element_text(size=10)) + 
+    scale_x_continuous(breaks=c(-3000, -2000,-1000,0, 1000, 2000, 3000),labels=c("-3000","-2000","-1000","TSS","1000","2000","3000")) +
+    geom_vline(xintercept= 0,linetype=5) +
+    scale_color_manual(values=brewer.pal(8,"Dark2")[c(1,4,3)]) +
+#    scale_color_manual(values=c("#66C2A5","#E78AC3","#8DA0CB")) +
+    theme(panel.border = element_rect(linetype = 1, size = 1, fill = NA), axis.line = element_blank(),axis.ticks.x = element_line(size=0.5)) + 
+    theme(legend.background = element_rect(fill=NA), legend.key = element_rect(fill=NA)) +
+    theme(axis.text = element_text(size=10,color="black"))
+p1
+
+p1 + facet_wrap(~ Sample, scales="free",ncol=3)
+
+#dev.off()
+```
+
+###03. CD34+ in APL and CD34+ H3K27ac specificity GeneHancer hist plot
+```{r}
+cd34.diff.df <-read.table("/mnt5/AML_H3K27ac_3ref/09.APL_CD34_process/CD34_H3K27ac.DIFF.hist.txt",header = TRUE,sep = "\t",quote = "")
+cd34.diff.df  %>% group_by(Sample) %>% summarise(n())
+```
+
+```{r}
+#pdf("PRandBRD4_in_PR_hist.pdf", width = 6, height = 4)
+#gg <- hist.diff.df[hist.diff.df$Sample == "RJQ",]
+p2 <- ggplot(cd34.diff.df,aes(x=Postion,y=Coverage,color=Type)) + 
+    geom_line(size=0.8,alpha = 0.5) + blank + ylab("TagDensity") +
+    theme(legend.justification = c("right", "top"), legend.position = c(1,1),legend.title = element_blank(),legend.text = element_text(size=10)) + 
+    scale_x_continuous(breaks=c(-3000, -2000,-1000,0, 1000, 2000, 3000),labels=c("-3000","-2000","-1000","TSS","1000","2000","3000")) +
+    geom_vline(xintercept= 0,linetype=5) +
+    scale_color_manual(values=brewer.pal(8,"Dark2")[c(1,4,3)]) +
+    theme(panel.border = element_rect(linetype = 1, size = 1, fill = NA), axis.line = element_blank(),axis.ticks.x = element_line(size=0.5)) + 
+    theme(legend.background = element_rect(fill=NA), legend.key = element_rect(fill=NA)) +
+    theme(axis.text = element_text(size=10,color="black"))
+p2
+
+p2 + facet_wrap(~ Sample, scales="free",ncol=3)
+
+#dev.off()
+```
+
+```{r}
+pdf("~/tmp4.pdf",width = 5,height = 7)
+plot_grid(p1,p2,nrow = 2)
+dev.off()
+```
+
+##Part V: H3K27ac peak heamap plot
+###01. build function for heatmap plot
+```{r}
+heatmap_sort <- function(heatmap.df) {
+#heatmap.df<-heatmap.df.1
+  bin_num <- (ncol(heatmap.df)-1)
+  summit <- ceiling(bin_num/2) + 1
+  start <- summit - ceiling(bin_num * 0.5) +1 
+  end <- summit + ceiling(bin_num * 0.5) -1
+  colnames(heatmap.df)[start]
+  colnames(heatmap.df)[summit]
+  colnames(heatmap.df)[end]
+  heatmap.df$Center_density <- rowSums(heatmap.df[,start:end])
+  heatmap.df.order<-heatmap.df %>% dplyr::arrange(-Center_density)
+}
+```
+
+```{r}
+ChIPseq_heatmap_plot <- function(file.input,brew.color="Oranges",max=10,filename="~/tmp.png",width = 2, height = 10) {
+#  file.input <- c("/mnt5/APL_H3K27ac_WangLab/09.APL_CD34_process/heatmap/CHH_H3K27ac_peaks.APL_CD34.heatmap.txt","/mnt5/APL_H3K27ac_WangLab/09.APL_CD34_process/heatmap/CHH_H3K27ac_peaks.APL_uniq.heatmap.txt","/mnt5/APL_H3K27ac_WangLab/09.APL_CD34_process/heatmap/CHH_H3K27ac_peaks.CD34_uniq.heatmap.txt")
+  heatmap.df.1 <-read.table(file.input[1], header = TRUE,sep = "\t",quote = "")
+  heatmap.df.2 <-read.table(file.input[2], header = TRUE,sep = "\t",quote = "")
+  heatmap.df.3 <-read.table(file.input[3], header = TRUE,sep = "\t",quote = "")
+  
+  heatmap.df.1 <- heatmap_sort(heatmap.df.1)
+  heatmap.df.2 <- heatmap_sort(heatmap.df.2)
+  heatmap.df.3 <- heatmap_sort(heatmap.df.3)
+  #library(pheatmap)
+  heatmap.df.order <- rbind(heatmap.df.1, heatmap.df.2, heatmap.df.3)
+  bin_num <- (ncol(heatmap.df.order)-2)
+  heatmap.df.order <- as.matrix(heatmap.df.order[,1:bin_num+1])
+  heatmap.df.order <- log2(heatmap.df.order+1)
+  heatmap.df.order[heatmap.df.order > max] = max
+  #png("~/tmp.png",width = 1000,height = 5000)
+  pheatmap(heatmap.df.order, kmeans_k = NA, 
+           scale = "none",cellwidth = NA, cellheight = NA, 
+           show_rownames=FALSE, show_colnames = FALSE,
+           annotation_names_col=FALSE, annotation_legend=TRUE, cluster_rows = FALSE, 
+           legend = FALSE,
+           gaps_row = c(nrow(heatmap.df.1), nrow(heatmap.df.1) + nrow(heatmap.df.2)),
+           filename = filename,
+           width = width,
+           height = height,
+           cluster_cols = FALSE,color = colorRampPalette(brewer.pal(n = 9, name =brew.color))(100)
+           )
+  #dev.off()
+}
+```
+
+###02. Heatmap of APL
+```{r}
+heatmap_input <- read.table("/mnt5/APL_H3K27ac_WangLab/09.APL_CD34_process/heatmap.input.txt", sep = "\t", header = TRUE, quote = "", stringsAsFactors = FALSE)
+
+lapply(1:nrow(heatmap_input),function(x){
+  filename <- paste0("~/tmp_apl",x,".png")
+  ChIPseq_heatmap_plot(as.character(heatmap_input[x,1:3]), filename = filename)
+})
+```
+
+###03. Heatmap of CD34
+```{r}
+heatmap_input <- read.table("/mnt5/AML_H3K27ac_3ref/09.APL_CD34_process/heatmap.input.txt", sep = "\t", header = TRUE, quote = "", stringsAsFactors = FALSE)
+
+lapply(1:nrow(heatmap_input),function(x){
+  filename <- paste0("~/tmp_cd34",x,".png")
+  ChIPseq_heatmap_plot(as.character(heatmap_input[x,1:3]), filename = filename, brew.color="Blues")
+})
+```
+
+```{r}
+ChIPseq_heatmap_plot(as.character(heatmap_input[1,1:3]), filename = "~/haha.pdf", width = 3, height = 4, brew.color="Blues")
+```
+
+##Part VI: Enrichment Motif Heatmap of H3K27ac 
+```{r}
+motif.matrix <- read.table("/mnt5/APL_H3K27ac_WangLab/09.APL_CD34_process/Enhancer_APL_CD34.merge.knownResults.txt", sep = "\t", quote = "", header = TRUE, stringsAsFactors = FALSE)
+motif.pv <- -log10(motif.matrix[,3:5])
+rownames(motif.pv) <- motif.matrix$Motif_Nname
+pheatmap(motif.pv,show_rownames = FALSE)
+```
+```{r}
+motif.list<-list(MYB="GGCVGTTR",BMYB="NHAACBGYYV",CEBPB="ATTGCGCAAC",RFX2="GTTGCCATGGCAACM",RFX3="CGGTTGCCATGGCAAC",YY1="CAAGATGGCGGC")
+index <- match(as.character(motif.list),motif.matrix$Consensus)
+motif.pv.interest <-motif.matrix[index,3:5]
+rownames(motif.pv.interest) <- names(motif.list)
+motif.pv.interest <- -log10(motif.pv.interest)
+```
+
+```{r}
+#  pdf("~/bb.pdf",width = 5,height = 5)
+  pheatmap(motif.pv.interest, kmeans_k = NA, 
+           scale = "none",cellwidth = NA, cellheight = NA, 
+           show_rownames=TRUE, show_colnames = TRUE,
+           annotation_names_col=FALSE, annotation_legend=TRUE, cluster_rows = FALSE, 
+           legend = TRUE,
+           cluster_cols = FALSE,
+#           display_numbers = TRUE,
+           color = colorRampPalette(brewer.pal(n = 9, name ="Greens"))(10)
+           )
+#  dev.off()
+```
+
+##Part VII: APL-9 H3K27ac ChIPseq & APL-22 WGS combind
+
+###01.Saturation analysis for ChIPseq Peaks 
+```{r}
+peak_num <- read.table("/Volumes/TCGA-2/APL_H3K27ac_WangLab/02.callpeak/03.Saturation_analysis/test4.txt", sep = "\t", quote = "", header = TRUE, stringsAsFactors = FALSE)
+peak_num$Sample <- as.factor(peak_num$Sample)
+ggplot(peak_num, aes(x=Sample,y=Peaks)) + geom_boxplot()  + ylim(0,110000)
+
+peak_num.stat <- peak_num %>% group_by(Sample) %>% summarise(Mean=mean(Peaks),Median=median(Peaks),Q_low=quantile(Peaks)[2], Q_up=quantile(Peaks)[4])
+
+```
+```{r}
+x <- seq(1:100)
+
+#######
+#y <- 39099.6 + 24274.1 * log(x)
+#y = 98932.46 - 75950.32/2^(x/2.62192)
+#y = 101284.6 + (19434.15 - 101284.6)/(1 + (x/500611500)^0.9083569)^23707090
+#y = 113253.1 + (25267.24 - 113253.1)/(1 + (x/3.538598)^1.238637)
+#y = 22980.75 - (-20080.37/0.2643929)*(1 - exp((-0.2643929*x)))
+#######
+#y = 26592 - (-15574.35/0.1926781)*(1 - exp((-0.1926781*x)))
+#y = 107423.2 - 80831.05/2^(x/3.597471)
+y = 109364.7 + (24376.96 - 109364.7)/(1 + (x/946617600)^0.9364162)^53661150
+#y = 125898.3 + (27497.19 - 125898.3)/(1 + (x/5.009945)^1.168424)
+
+dat <- data.frame(Sample = x,Median = y)
+ggplot(dat,aes(x=Sample,y=Median)) + geom_line() 
+
+max_value <- max(y)
+
+y_value <- c(max_value * 0.99, max_value * 0.95, max(peak_num.stat$Median), max_value * 0.90)
+x_value = log(1 - (26592 - y_value)/(-15574.35/0.1926781))/-0.1926781
+```
+
+```{r}
+kaka_2<-ggplot(peak_num.stat,aes(x=as.numeric(Sample),y=Median))  + 
+  geom_point() + 
+#  stat_smooth(method = "loess", color="red")  + 
+  blank + 
+  geom_hline(yintercept = 107422.9, linetype="dotted", color = brewer.pal(9,"RdBu")[2]) + 
+  geom_pointrange(aes(ymin=Q_low,ymax=Q_up),shape=18)+ylab("") + 
+  theme(panel.border = element_rect(fill = NA, linetype = 1, size = 1), axis.line = element_blank()) + 
+  geom_line(data = dat, color = brewer.pal(9,"RdBu")[8]) +
+  geom_vline(xintercept = x_value, linetype = "dotted",color="grey40") +
+#  geom_hline(yintercept = y_value, linetype = "dotted",color="grey") +
+#  geom_segment(x = x_value, y=c(0,0,0,0), xend = x_value, yend = y_value, color="grey",linetype = 2) +
+  ylim(30000,120000) + xlim(0,25) + xlab("Number of Patient Samples") + ylab("Number of H3K27ac-positive regions")
+
+kaka_2
+
+#pdf("~/kaka_2.pdf", width=6, height=4, useDingbats=FALSE)
+#kaka_2
+#dev.off()
+```
+
+```{r}
+x <- as.numeric(peak_num.stat$Sample)
+y <- as.numeric(peak_num.stat$Median)
+nlmod <- nls(y ~  Const + A * log(x))
+#nlmod <- nls(y ~  Const + A/2^(x/B))
+#nlmod <- nls(y ~  Const + A*x^B)
+plot(x,y, main = "nls(*), data, true function and fit, n=100")
+#curve(69052.973 + exp(x * 1.138), col = 4, add = TRUE)
+lines(x, predict(nlmod), col = 2)
+
+summary(nlmod)
+```
+
+
+###02.mutation stat bar plot
+```{r}
+mut.stat <- read.table("/data/liuyabin/test/ondriverFML/02.stat/ALL_APL_wgs_mutation.stat.txt", sep = "\t", quote = "", header = TRUE, stringsAsFactors = FALSE)
+
+mycolor = c("#4292C6","black","#EF3B2C", "grey70", "#41AB5D", "pink", "#6A3D9A", "#CAB2D6")
+names(mycolor) <- c("C>A", "C>G", "C>T", "T>A", "T>C", "T>G", "INS", "DEL") 
+
+mut.stat$Type <- factor(mut.stat$Type, levels = rev(c("C>A", "C>G", "C>T", "T>A", "T>C", "T>G", "INS", "DEL")))
+mut.stat.2 <- mut.stat %>% group_by(Sample) %>% summarise(Sum=sum(Number))
+sam.leverls <- mut.stat.2[rev(sort(mut.stat.2$Sum,index.return=TRUE)$ix),]$Sample
+mut.stat$Sample <- factor(mut.stat$Sample, levels = sam.leverls)
+
+kaka_1 <- ggplot(mut.stat, aes(x=Sample, y = Number, fill=Type)) + geom_col(position = "stack") + blank + scale_fill_manual(values = mycolor) + theme(axis.text.x = element_text(angle = 90)) + ylab("Number of Mutations") + xlab("")
+
+kaka_1
+
+pdf("~/kaka_1.pdf", width=6, height=4)
+kaka_1
+dev.off()
+```
+
+```{r}
+ggplot(mut.stat, aes(x=Sample, y = Number, fill=Type)) + geom_line(aes(group=Type, color = Type)) + blank + scale_fill_manual(values = brewer.pal(8,"Dark2"))
+
+ggplot(mut.stat, aes(as.numeric(Sample))) + geom_area(aes(y=Number,group = Type, fill= Type)) + blank + scale_fill_manual(values = brewer.pal(8,"Dark2"))
+
+```
+
+###03.Mutation enrichment around motif 
+```{r}
+motif.mut <- read.table("/data/liuyabin/test/ondriverFML/08.MEMOS_advance/IRF1/IRF1.mutation.stat", sep = "\t", quote = "", header = TRUE, stringsAsFactors = FALSE)
+motif.mut$TVTI <- factor(motif.mut$TVTI, levels = rev(c("C>A", "C>G", "C>T", "T>A", "T>C", "T>G", "INS", "DEL")))
+
+mycolor = c("#4292C6","black","#EF3B2C", "grey70", "#41AB5D", "pink", "#6A3D9A", "#CAB2D6")
+names(mycolor) <- c("C>A", "C>G", "C>T", "T>A", "T>C", "T>G", "INS", "DEL") 
+
+ggplot(motif.mut, aes(POS)) + geom_area(aes(y=NUM,group = TVTI, fill= TVTI)) + 
+    blank + scale_fill_manual(values = mycolor) +
+#    theme(legend.justification = c("right", "top"), legend.position = c(1,1),legend.title = element_blank(),legend.text = element_text(size=10)) + 
+    scale_x_continuous(breaks=c(-500,0, 500),labels=c("-500","Motif","500")) +
+    geom_vline(xintercept= c(-10,10),linetype=5,size=0.2)  +
+    theme(panel.border = element_rect(linetype = 1, size = 0.5, fill = NA), axis.line = element_blank(),axis.ticks.x = element_line(size=0.5)) + 
+    theme(legend.background = element_rect(fill=NA), legend.key = element_rect(fill=NA)) +
+    theme(axis.text = element_text(size=10,color="black")) +
+    xlab("") + ylab("Number of Mutations Per Bin") 
+```
+
+```{r}
+arr <- read.table("/data/liuyabin/test/ondriverFML/08.MEMOS_advance/IRF1/IRF1.bg.txt", sep = "\t", quote = "", header = FALSE, stringsAsFactors = FALSE)
+arr <- as.numeric(arr$V1)
+#arr <- as.numeric(arr[1:10000])
+mean(arr)
+sd(arr)
+arr_zs <- (arr - mean(arr)) / sd(arr)
+gg <- data.frame(NUM=arr, ZS=arr_zs)
+ggplot(gg,aes(NUM)) + geom_density() + geom_vline(xintercept = quantile(arr, probs=seq(0,1,0.05))[20])
+
+quantile(arr_zs, probs=seq(0,1,0.05))[20]
+mean(arr)
+sd(arr)
+```
+
+```{r}
+motif.count <- read.table("/data/liuyabin/test/ondriverFML/08.MEMOS_advance/RUNX1/RUNX1.mutation.count", sep = "\t", quote = "", header = TRUE, stringsAsFactors = FALSE)
+ggplot(motif.count, aes(x=POS, y=ZS)) + 
+  geom_point() + 
+  stat_smooth(method = "loess")  + 
+#  geom_hline(yintercept = qnorm(0.95, mean = 0, sd = 1, log = FALSE)) + 
+  blank + 
+  xlab("Flanking Region (bp)") + ylab("Enrichment of Mutations (Z-score)")
+```
+
+
+```{r}
+motif.count <- read.table("/data/liuyabin/test/ondriverFML/08.MEMOS_advance/TF_motif_mutation.merge.count", sep = "\t", quote = "", header = TRUE, stringsAsFactors = FALSE)
+#motif.count$ZS <- (motif.count$NUM - mean(arr)) / sd(arr)
+colnames(motif.count) <- c("POS","NUM","ZS","TF")
+ggplot(motif.count, aes(x=POS, y=ZS,color=TF)) + 
+  geom_point() + 
+  stat_smooth(method = "loess", aes(color=TF,group=TF))  + 
+  geom_hline(yintercept = qnorm(0.95, mean = 0, sd = 1, log = FALSE)) + 
+  blank + 
+  scale_color_manual(values = c(brewer.pal(8,"Dark2"),"Darkred","Darkblue")) +
+  xlab("Flanking Region (bp)") + ylab("Enrichment of Mutations (Z-score)")
+```
+
+```{r}
+motif.count.1 <- read.table("/data/liuyabin/test/ondriverFML/08.MEMOS_advance/TF_motif_mutation.1.count", sep = "\t", quote = "", header = FALSE, stringsAsFactors = FALSE)
+motif.count.2 <- read.table("/data/liuyabin/test/ondriverFML/08.MEMOS_advance/TF_motif_mutation.2.count", sep = "\t", quote = "", header = FALSE, stringsAsFactors = FALSE)
+motif.count.3 <- read.table("/data/liuyabin/test/ondriverFML/08.MEMOS_advance/TF_motif_mutation.3.count", sep = "\t", quote = "", header = FALSE, stringsAsFactors = FALSE)
+colnames(motif.count.1) <- c("POS","NUM","ZS","TF")
+colnames(motif.count.2) <- c("POS","NUM","ZS","TF")
+colnames(motif.count.3) <- c("POS","NUM","ZS","TF")
+
+pdf("~/kaka_6.pdf", width=4, height=4, useDingbats=FALSE)
+
+ggplot(motif.count.1, aes(x=POS, y=ZS,color=TF)) + 
+  geom_point() + 
+  stat_smooth(method = "loess", aes(color=TF,group=TF))  + 
+  geom_hline(yintercept = qnorm(0.95, mean = 0, sd = 1, log = FALSE), linetype = "dotted") + 
+  blank + 
+  scale_color_manual(values = c(brewer.pal(8,"Dark2"),"Darkred","Darkblue")[1:3]) +
+  xlab("Flanking Region (bp)") + ylab("Enrichment of Mutations (Z-score)") +
+  theme(legend.key = element_blank(),legend.title = element_blank(), 
+          legend.position = c(.95, .95), legend.justification = c("right", "top")) + ylim(-10,20)
+
+ggplot(motif.count.2, aes(x=POS, y=ZS,color=TF)) + 
+  geom_point() + 
+  stat_smooth(method = "loess", aes(color=TF,group=TF))  + 
+  geom_hline(yintercept = qnorm(0.95, mean = 0, sd = 1, log = FALSE),linetype = "dotted") + 
+  blank + 
+  scale_color_manual(values = c(brewer.pal(8,"Dark2"),"Darkred","Darkblue")[4:6]) +
+  xlab("Flanking Region (bp)") + ylab("Enrichment of Mutations (Z-score)") +
+  theme(legend.key = element_blank(),legend.title = element_blank(), 
+          legend.position = c(.95, .95), legend.justification = c("right", "top")) + ylim(-10,20)
+
+ggplot(motif.count.3, aes(x=POS, y=ZS,color=TF)) + 
+  geom_point() + 
+  stat_smooth(method = "loess", aes(color=TF,group=TF))  + 
+  geom_hline(yintercept = qnorm(0.95, mean = 0, sd = 1, log = FALSE),linetype = "dotted") + 
+  blank + 
+  scale_color_manual(values = c(brewer.pal(8,"Dark2"),"Darkblue","Darkred")[7:9]) +
+  xlab("Flanking Region (bp)") + ylab("Enrichment of Mutations (Z-score)") +
+  theme(legend.key = element_blank(),legend.title = element_blank(), 
+          legend.position = c(.95, .95), legend.justification = c("right", "top")) + ylim(-10,20) 
+dev.off()
+```
+
+###04. motif enrichment by homer
+```{r}
+motif_enrich <- read.table("/data/liuyabin/test/ondriverFML/07.merge_motif_random/APL_CRE_mutation_merge_motif.txt", header = TRUE)
+motif_enrich.median <- motif_enrich %>% group_by(MotifName) %>% summarise(Median=median(Pvalue)) %>% arrange(Median)
+motif_enrich.median$rank <- rank(motif_enrich.median$Median)
+motif_enrich.median[grepl("MYB", motif_enrich.median$MotifName),]
+motif_enrich$MotifName <- factor(motif_enrich$MotifName, levels = motif_enrich.median$MotifName)
+
+
+top20 <- motif_enrich.median[motif_enrich.median$rank <= 20,]$MotifName
+motif_enrich.top20 <- motif_enrich[motif_enrich$MotifName %in% top20,]
+ggplot(motif_enrich.top20, aes(x=MotifName, y=-log10(Pvalue))) + geom_boxplot() + theme(axis.text.x = element_text(angle=30))
+```
+
+```{r}
+motif_fm.median <- motif_enrich %>% group_by(MotifFamily) %>% summarise(Median=median(Pvalue)) %>% arrange(Median)
+motif_fm.median$rank <- rank(motif_fm.median$Median)
+motif_enrich$MotifFamily <- factor(motif_enrich$MotifFamily, levels = motif_fm.median$MotifFamily)
+
+ggplot(motif_enrich, aes(x=MotifFamily, y=-log10(Pvalue))) + geom_boxplot() + theme(axis.text.x = element_text(angle=30))
+```
+```{r}
+motif_fm.num <- motif_enrich %>% group_by(MotifFamily) %>% summarise(Num=n()/200) %>% filter(Num>2)
+ 
+ggplot(motif_enrich[motif_enrich$MotifFamily %in% motif_fm.num$MotifFamily ,], 
+       aes(x=MotifFamily, y=-log10(Pvalue))) + 
+  geom_boxplot(color="#0071BC", fill = "#0071BC", alpha = 0.65, outlier.shape = NA) +
+  theme(axis.text.x = element_text(angle=30, hjust = 1)) +
+  blank + 
+  theme(panel.border = element_rect(fill = NA, linetype = 1, size = 1), axis.line = element_blank()) + xlab("")
+```
+
+```{r}
+motif_fm.select <- motif_enrich %>% group_by(MotifName,MotifFamily) %>% summarise(Median=median(Pvalue)) %>% arrange(MotifFamily,Median)
+
+motif_fm.select<-motif_fm.select[! duplicated(motif_fm.select$MotifFamily),]
+motif_enrich.select <- motif_enrich[motif_enrich$MotifName %in% motif_fm.select$MotifName,]
+#motif_enrich.select <- motif_enrich.select[motif_enrich.select$MotifFamily %in% motif_fm.num$MotifFamily,]
+motif_fm.select <- motif_fm.select %>% arrange(Median)
+motif_enrich.select$MotifFamily <- factor(motif_enrich.select$MotifFamily, levels = motif_fm.select$MotifFamily)
+
+kaka_4 <- ggplot(motif_enrich.select, aes(x=MotifFamily, y=-log10(Pvalue))) + 
+  geom_boxplot(color="#0071BC", fill = "#0071BC", alpha = 0.65) +
+  theme(axis.text.x = element_text(angle=30, hjust = 1)) +
+  blank + 
+  theme(panel.border = element_rect(fill = NA, linetype = 1, size = 1), axis.line = element_blank()) + xlab("")
+
+kaka_4
+
+pdf("~/kaka_4.pdf", width=8, height=3, useDingbats=FALSE)
+kaka_4
+dev.off()
+```
+
+###05.mutation CRE stat
+```{r}
+apl_cre_mut.anno <- read.table("/data/liuyabin/test/ondriverFML/02.stat/APL_CRE.anno.mutation.txt", header=TRUE, row.names = 1, stringsAsFactors = FALSE, quote = "", sep = "\t")
+```
+
+```{r}
+apl_cre_mut.anno$Type<-(sapply(apl_cre_mut.anno$Annotation,function(x){strsplit(x," \\(")[[1]][1]}))
+
+df.pie <- apl_cre_mut.anno %>% group_by(Type) %>% summarise(Num=n(), Pro=round(n()/nrow(apl_cre_mut.anno)*100,1))
+df.pie$labs <- paste(df.pie$Pro, "%")
+df.pie <- data.table::as.data.table(df.pie)
+df.pie$Type <- factor(df.pie$Type,levels = rev(c("intron","promoter-TSS","Intergenic","exon","TTS","5' UTR","non-coding","3' UTR")))
+df.pie$Sample <- rep("MUT", nrow(df.pie))
+
+t1 <- ggplot(df.pie, aes(x=Sample, y = Num, fill=Type)) + geom_col(position = "fill", show.legend = FALSE) + blank + scale_fill_manual(values = rev(brewer.pal(12,"Paired")[c(1,2,3,4,5,7,8,9)]))
+df.bar <- data.frame(NUM=c(47816,1393), TYPE=c("ALLCRE","MUTCRE"), Sample=c("MUT","MUT"))
+t2 <- ggplot(df.bar, aes(x=Sample, y = NUM, fill=TYPE)) + geom_col(position = "fill", show.legend = FALSE) + blank + scale_fill_manual(values=brewer.pal(12,"Paired")[c(1,2)])
+df.bar2 <- data.frame(NUM=c(29982, 4012, 10601, 1380, 1252, 432, 597, 954), Type=factor(c("intron","promoter-TSS","Intergenic","exon","TTS","5' UTR","non-coding","3' UTR"), levels = rev(c("intron","promoter-TSS","Intergenic","exon","TTS","5' UTR","non-coding","3' UTR"))),Sample=rep("MUT",8))
+t3 <- ggplot(df.bar2, aes(x=Sample, y = NUM, fill=Type)) + geom_col(position = "fill", show.legend = FALSE) + blank + scale_fill_manual(values = rev(brewer.pal(12,"Paired")[c(1,2,3,4,5,7,8,9)]))
+
+t1
+t2
+t3
+
+pdf("~/kaka_5.pdf",width = 1, height=4)
+t1
+t2
+t3
+dev.off()
+```
+
+```{r}
+apl_cre_all.anno <- read.table("/mnt5/APL_H3K27ac_WangLab/02.callpeak/02.merge_peak/APL_CRE.anno.bed", header=TRUE, row.names = 1, stringsAsFactors = FALSE, quote = "", sep = "\t")
+```
+
+###06.Mutation burden based on  genome region 
+```{r}
+mut_burden.stat <- read.table("/data/liuyabin/test/ondriverFML/02.stat/ALL_APL_wgs_mutation.pos.txt",header = TRUE)
+
+mut_burden.stat.median <- mut_burden.stat %>% group_by(Type) %>% summarise(Median = median(Mut_burden)) %>% arrange(Median)
+mut_burden.stat$Type <- factor(mut_burden.stat$Type,levels = mut_burden.stat.median$Type)
+
+mut_num.stat.median <- mut_burden.stat %>% group_by(Type) %>% summarise(Median = median(Mut_Number)) %>% arrange(Median)
+mut_burden.stat$Type <- factor(mut_burden.stat$Type,levels = mut_num.stat.median$Type)
+
+mut_burden.stat.2 <- mut_burden.stat %>% group_by(Sample,Type2) %>% summarise(Mut_Number=sum(Mut_Number))
+mut_burden.stat.2$Type <- mut_burden.stat.2$Type2 
+```
+
+```{r}
+haha0 <- ggplot(mut_burden.stat.2, aes(x=Type, y=Mut_Number)) + 
+  geom_boxplot(aes( fill = Type2,color=Type2), alpha = 0.65, outlier.shape = 21, show.legend = FALSE) +
+  theme(axis.text.x = element_text(angle=30, hjust = 1)) +
+  blank + 
+  theme(panel.border = element_rect(fill = NA, linetype = 1, size = 1), axis.line = element_blank()) + xlab("")  + ylab("Mutation Number") + 
+  scale_fill_manual(values = brewer.pal(8,"Paired")[c(8,2)]) + 
+  scale_color_manual(values = brewer.pal(8,"Paired")[c(8,2)]) + 
+  facet_grid(~Type2, scales = 'free', space = 'free_x', switch = "y")
+#+ scale_y_log10()
+haha0
+
+pdf("~/kaka_7.pdf", width = 2, height = 4, useDingbats = FALSE)
+haha0
+dev.off()
+```
+
+
+```{r}
+ha1 <- ggplot(mut_burden.stat, aes(x=Type, y=Mut_burden)) + 
+  geom_boxplot(aes( fill = Type2, color= Type2),  alpha = 0.65, outlier.shape = 21, show.legend = FALSE) +
+  theme(axis.text.x = element_text(angle=30, hjust = 1)) +
+  blank + 
+  theme(panel.border = element_rect(fill = NA, linetype = 1, size = 1), axis.line = element_blank()) + xlab("") + scale_y_log10() + ylab("Mutation Burden/Gb") + scale_fill_manual(values = brewer.pal(8,"Paired")[c(8,2)]) + scale_color_manual(values = brewer.pal(8,"Paired")[c(8,2)]) + facet_grid(~Type2, scales = 'free', space = 'free_x', switch = "y")
+ha2<-
+ggplot(mut_burden.stat, aes(x=Type, y=Mut_Number)) + 
+  geom_boxplot(aes( fill = Type2,color=Type2), alpha = 0.65, outlier.shape = 21, show.legend = FALSE) +
+  theme(axis.text.x = element_text(angle=30, hjust = 1)) +
+  blank + 
+  theme(panel.border = element_rect(fill = NA, linetype = 1, size = 1), axis.line = element_blank()) + xlab("") + scale_y_log10() + ylab("Mutation Number") + 
+  scale_fill_manual(values = brewer.pal(8,"Paired")[c(8,2)]) + 
+  scale_color_manual(values = brewer.pal(8,"Paired")[c(8,2)]) + 
+  facet_grid(~Type2, scales = 'free', space = 'free_x', switch = "y")
+```
+
+```{r}
+a<-mut_burden.stat %>% group_by(Type) %>% summarise(lower = t.test(Mut_burden)$conf.int[1], mean= mean(Mut_burden), upper = t.test(Mut_burden)$conf.int[2])
+
+a$Type2 <- c("Noncoding","Coding",rep("Noncoding",4))
+ha3<-ggplot(a,aes(x=Type,y=mean)) + 
+  geom_col(aes( fill = Type2,color=Type2), alpha = 0.65, show.legend = FALSE) + 
+  geom_errorbar(aes(x=Type,ymin=lower,ymax=upper), width = 0.2) + 
+  blank  + 
+  theme(panel.border = element_rect(fill = NA, linetype = 1, size = 1), axis.line = element_blank()) +
+  scale_color_manual(values = brewer.pal(8,"Paired")[c(8,2)]) +
+  scale_fill_manual(values = brewer.pal(8,"Paired")[c(8,2)]) + 
+  theme(axis.text.x = element_text(angle=30, hjust = 1)) +
+  facet_grid(~Type2, scales = 'free', space = 'free_x', switch = "y") +
+  ylab("Mutation Burden/Gb") + xlab("")
+```
+```{r}
+ha1
+ha2
+ha3
+
+pdf("~/kaka_7.pdf", width = 4, height = 4, useDingbats = FALSE)
+ha1
+ha2
+ha3
+dev.off()
+```
+
+
+```{r}
+mut_stat <- data.frame(Type=c("CDS+Splice","Intron", "Intergenic","3'UTR+3'Flank","5'UTR+5'Flank","ncRNA"),Num=c(646,10630,28068,445,276,2540))
+mut_stat$Type <- factor(mut_stat$Type, levels = c("Intergenic", "Intron", "ncRNA", "CDS+Splice","3'UTR+3'Flank",  "5'UTR+5'Flank"))
+mut_stat$Label <- paste(round(mut_stat$Num / sum(mut_stat$Num)*100,2),"%")
+
+col <- brewer.pal(n=11, name="Paired")[c(1,2,7,8,3,4)]
+names(col) = c("Intron", "Intergenic", "ncRNA", "CDS+Splice","3'UTR+3'Flank",  "5'UTR+5'Flank")
+
+
+kaka_8 <- ggdonutchart(mut_stat, "Num",  fill = "Type",label = "Label",color = "white",lab.pos = "out", lab.font = c("black","blod",5)) + theme(legend.position = "right") + scale_fill_manual(values = col) 
+
+kaka_8
+
+pdf("~/kaka_8.pdf", width = 10, height = 5)
+kaka_8
+dev.off
+```
+
+
+
+```{r}
+aml_maf_df <- read.table("~/test/ondriverFML/02.stat/ALL_APL_wgs_mutation.sort.maf", header = TRUE, stringsAsFactors = FALSE, quote = "", sep = "\t")
+aml_maf_df.classi <-aml_maf_df %>% group_by(Variant_Classification) %>% summarise(Num=n()) %>% arrange(-Num)
+
+col <- brewer.pal(n=11, name="Paired")
+names(col) = c('Frame_Shift_Del','Missense_Mutation', 'Nonsense_Mutation', 'Multi_Hit', 'Frame_Shift_Ins', 'In_Frame_Ins', 'Splice_Site', 'In_Frame_Del', "Nonstop_Mutation","Amp", "Del")
+
+aml_maf_df.classi<-aml_maf_df.classi[aml_maf_df.classi$Variant_Classification  %in% names(col),]
+aml_maf_df.classi$Percentage <-  paste(round(aml_maf_df.classi$Num / sum(aml_maf_df.classi$Num)*100,2),"%")
+
+aml_maf_df.classi$Variant_Classification <- factor(aml_maf_df.classi$Variant_Classification, levels = aml_maf_df.classi$Variant_Classification)
+
+kaka_8 <- ggdonutchart(aml_maf_df.classi, "Num", label = "Percentage", fill = "Variant_Classification",color = "white",lab.pos = "out", lab.font = c("black","blod",5)) + theme(legend.position = "right")  + scale_fill_manual(values = col)
+
+kaka_8
+
+pdf("~/kaka_8.pdf", width = 10, height = 5)
+kaka_8
+dev.off
+```
+
+
+##Part VIII APL CRC result display
+
+###01. CRC target gene per Sample
+```{r}
+crc_tg.jaccard <- read.table("/mnt5/APL_H3K27ac_WangLab/10.CRCmapper/extend/APL_CRC_target_gene.jaccard.txt", header = TRUE, row.names = 1, quote = "", sep = "\t") 
+crc_tg.jaccard <- as.matrix(crc_tg.jaccard)
+#crc_tg.jaccard <- sqrt(crc_tg.jaccard)
+crc_tg.jaccard<-rbind(crc_tg.jaccard,rep(0,ncol(crc_tg.jaccard)))
+
+#pheatmap::pheatmap(crc_tg.jaccard, color = colorRampPalette(brewer.pal(n = 9, name ="Greens"))(100))
+pdf("~/kaka_15.pdf", width=4,height=4)
+pheatmap::pheatmap(crc_tg.jaccard, color = colorRampPalette(brewer.pal(n = 4, name ="Blues"))(10))
+dev.off()
+```
+
+```{r}
+pdf("~/kaka_16.pdf", width=3,height=4)
+crc_tg.recurrent <- data.frame(ID=c("1","2","3","4","5-7"), NUM=c(1191,691,469,396,1598))
+ggplot(crc_tg.recurrent, aes(x=ID,y=NUM)) + geom_col(fill=brewer.pal(9,"Paired")[2]) +  geom_text(mapping = aes(label = NUM),  colour= "black", vjust=-1, position = position_dodge(0.5) ) + blank + theme(panel.border = element_rect(fill = NA, linetype = 1, size = 1), axis.line = element_blank()) + ylab("Number of CRC Target Genes") + xlab("#Samples")
+dev.off()
+```
+
+###02. GO analysis of CRC target gene
+```{r}
+crc_tg.gene <- read.table("/mnt5/APL_H3K27ac_WangLab/10.CRCmapper/extend/gene.list", header = FALSE,stringsAsFactors = FALSE, quote = "", sep = "\t")
+names(crc_tg.gene) <- "Symbol"
+crc_tg.gene$Entrez <- TransGeneID(crc_tg.gene$Symbol, "Symbol", "Entrez", organism = "hsa")
+View(crc_tg.gene)
+write.table(crc_tg.gene,"/mnt5/APL_H3K27ac_WangLab/10.CRCmapper/extend/crc_tg.gene.txt",quote = FALSE, sep = "\t", row.names=FALSE)
+```
+
+```{r}
+crc_tg.gene.ls <- unique(na.omit(crc_tg.gene$Entrez))
+Enricher.crc_tg <- enrich_combind(crc_tg.gene.ls,0.5,0.5)
+```
+
+```{r}
+enricher_plot(Enricher.crc_tg,1:5,1:5,1:5,1:5,1:5,5) + ggtitle("APL CRC Target Genes")
+```
+
+###03. Rnaseq analysis APL vs MNC
+```{r}
+aml_all_count.matrix <- read.table("/mnt5/BEAT_AML_RNAseq_count/06.count_merge_new/AML_merge.count2.txt",row.names = 1,header = TRUE)
+aml_all_wt1.tpm <- read.table("/mnt5/BEAT_AML_RNAseq_count/06.count_merge_new/AML_RNAseq.wt1.anno2.txt",header = TRUE,sep="\t",stringsAsFactors = FALSE)
+aml_all_wt1.clinc <- read.table("/mnt5/BEAT_AML_RNAseq_count/06.count_merge_new/AML_combind_clinical.process.txt",header = TRUE,sep="\t",stringsAsFactors = FALSE)
+aml_all_wt1.clinc<-merge(aml_all_wt1.tpm,aml_all_wt1.clinc, by.x=2,by.y=1, all=FALSE)
+aml_all_wt1.clinc <- data.table::as.data.table(aml_all_wt1.clinc)
+aml_all_wt1.clinc[,`:=`(IDH2 = IDH2_p140 + IDH2_p172)]
+```
+
+```{r}
+beat_apl.sample <- aml_all_wt1.clinc[aml_all_wt1.clinc$t15_17 == 1 & aml_all_wt1.clinc$Source2 == "BEAT"  & aml_all_wt1.clinc$Type == "Primary",]$SampleID
+aml_all_wt1.clinc[aml_all_wt1.clinc$t15_17 == 1 & aml_all_wt1.clinc$Source2 == "BEAT",]$SampleID
+beat_mnc.sample <- aml_all_wt1.tpm[aml_all_wt1.tpm$Tissue == "MNC",]$SampleID
+beat_cd34.sample <- aml_all_wt1.tpm[aml_all_wt1.tpm$Tissue == "CD34",]$SampleID
+```
+
+```{r}
+DESeq2_apl_mnc.design <- data.frame(SampleID=c(beat_apl.sample, beat_mnc.sample), Group = c(rep("APL",length(beat_apl.sample)),rep("MNC",length(beat_mnc.sample))))
+DESeq2_apl_mnc.count <- aml_all_count.matrix[,as.character(DESeq2_apl_mnc.design$SampleID)]
+```
+
+```{r}
+DESeq2_apl_mnc.deg <- DESeq2_DEG_analysis(DESeq2_apl_mnc.count, DESeq2_apl_mnc.design)
+DESeq2_apl_mnc.deg <- DESeq2_DEG_extract(DESeq2_apl_mnc.deg, DESeq2_apl_mnc.design, plot=FALSE)
+DESeq2_apl_mnc.deg.list <- c(DESeq2_apl_mnc.deg$up$Row.names,DESeq2_apl_mnc.deg$down$Row.names)
+```
+
+```{r}
+nrow(DESeq2_apl_mnc.deg$up)
+nrow(DESeq2_apl_mnc.deg$down)
+crc_tg.gene[crc_tg.gene$Symbol %in% DESeq2_apl_mnc.deg$down$Symbol,]
+```
+
+```{r}
+DESeq2_apl_cd34.design <- data.frame(SampleID=c(beat_apl.sample, beat_cd34.sample), Group = c(rep("APL",length(beat_apl.sample)),rep("CD34",length(beat_cd34.sample))))
+DESeq2_apl_cd34.count <- aml_all_count.matrix[,as.character(DESeq2_apl_cd34.design$SampleID)]
+DESeq2_apl_cd34.design$Group <- factor(DESeq2_apl_cd34.design$Group, levels = c("CD34", "APL"))
+```
+
+```{r}
+DESeq2_apl_cd34.deg <- DESeq2_DEG_analysis(DESeq2_apl_cd34.count, DESeq2_apl_cd34.design)
+```
+```{r}
+#pdf("~/kaka_11.pdf")
+DESeq2_apl_cd34.deg <- DESeq2_DEG_extract(DESeq2_apl_cd34.deg, DESeq2_apl_cd34.design, plot=TRUE)
+#dev.off()
+```
+
+
+```{r}
+nrow(DESeq2_apl_cd34.deg$up)
+nrow(DESeq2_apl_cd34.deg$down)
+crc_tg.gene[crc_tg.gene$Symbol %in% DESeq2_apl_cd34.deg$up$Symbol,]
+```
+
+###04. GEA of CRC target overlap APL up-regulated DEGs
+```{r}
+crc_tg.deg.ls <- unique(na.omit(crc_tg.gene[crc_tg.gene$Symbol %in% DESeq2_apl_cd34.deg$up$Symbol,]$Entrez))
+Enricher.crc_deg <- enrich_combind(crc_tg.deg.ls,0.5,0.5)
+enricher_plot(Enricher.crc_deg,1:5,1:5,1:5,1:5,1:5,5) + ggtitle("APL CRC target deg")
+```
+
+```{r}
+select_GO_term <- c("neutrophil mediated immunity", "leukocyte cell-cell adhesion", "T cell activation", "leukocyte migration", "regulation of MAP kinase activity", "coagulation", "cell chemotaxis", "positive regulation of cytokine production", "platelet activation", "myeloid cell differentiation")
+
+crc_deg.ego_bp<-Enricher.crc_deg$ego_bp[Enricher.crc_deg$ego_bp$Description %in% select_GO_term, c("Description", "qvalue")]
+crc_deg.ego_bp$Label  <- "GO_BP"
+
+kaka_12.1 <- ggplot(crc_deg.ego_bp,aes(y=fct_reorder(Description, -log(qvalue)),x=Label)) + geom_point(aes(size=-log10(qvalue)), color = brewer.pal(8, "BuGn")[8]) + blank + theme(panel.border = element_rect(fill = NA, linetype = 1, size = 1), axis.line = element_blank())
+
+kaka_12.1
+
+pdf("~/kaka_12.1.pdf", width = 5, height = 4, useDingbats = FALSE)
+kaka_12.1
+dev.off()
+```
+
+###05. GEA of Genes regulated by APL CREs with mutations 
+```{r}
+apl_cre_mut.anno <- read.table("/data/liuyabin/test/ondriverFML/02.stat/APL_CRE.anno.mutation.txt", header=TRUE, row.names = 1, stringsAsFactors = FALSE, quote = "", sep = "\t")
+apl_cre_mut.anno.gene <- unique(na.omit(apl_cre_mut.anno$Entrez.ID))
+Enricher.apl_cre_mut <- enrich_combind(apl_cre_mut.anno.gene,0.5,0.5)
+enricher_plot(Enricher.apl_cre_mut,1:5,1:5,1:5,1:5,1:5,5) + ggtitle("APL mut CRE")
+```
+
+```{r}
+select_GO_term <- c("Rmyeloid cell homeostasis", "myeloid cell differentiation", "Ras protein signal transduction", "homeostasis of number of cells", "alpha-beta T cell differentiation", "neutrophil mediated immunity", "regulation of granulocyte differentiation", "T cell differentiation", "positive regulation of hemopoiesis", "positive regulation of cellular catabolic process")
+
+apl_cre_mut.ego_bp<-Enricher.apl_cre_mut$ego_bp[Enricher.apl_cre_mut$ego_bp$Description %in% select_GO_term, c("Description", "pvalue")]
+apl_cre_mut.ego_bp$Label  <- "GO_BP"
+
+kaka_12.2 <- ggplot(apl_cre_mut.ego_bp,aes(y=fct_reorder(Description, -log(pvalue)),x=Label)) + geom_point(aes(size=-log10(pvalue)), color = brewer.pal(8, "BuGn")[8]) + blank + theme(panel.border = element_rect(fill = NA, linetype = 1, size = 1), axis.line = element_blank())
+
+kaka_12.2
+
+pdf("~/kaka_12.2.pdf", width = 5, height = 5, useDingbats = FALSE)
+kaka_12.2
+dev.off()
+```
+
+###06. GEA of CRC target genes overlap CREs_mut genes
+```{r}
+apl_cre_mut.anno.gene <- unique(na.omit(apl_cre_mut.anno$Entrez.ID))
+crc_tg.mut.ls <- crc_tg.gene[crc_tg.gene$Entrez %in% apl_cre_mut.anno.gene,"Entrez"]
+Enricher.crc_mut <- enrich_combind(crc_tg.mut.ls,0.5,0.5)
+enricher_plot(Enricher.crc_mut,1:5,1:5,1:5,1:5,1:5,5) + ggtitle("APL CRC target deg")
+```
+
+```{r}
+#a <- data.frame(term=c("hsa05202","hsa05221","hsa04062","hsa04218","hsa04611"), term2=c("hsa05202","hsa05221","hsa04062","hsa04218","hsa04611"))
+#crc_tg.mut.ls
+#apl_cre_mut.anno.gene
+ekg<- enrichKEGG(crc_tg.mut.ls, organism = "hsa",pvalueCutoff = 0.01,qvalueCutoff  = 0.01)
+ekg <- setReadable(ekg, org.Hs.eg.db, keyType = "ENTREZID")
+
+pdf("~/kaka_17.pdf", width = 9, height = 6, useDingbats = FALSE)
+cnetplot(ekg, node_label="all", showCategory = 5,circular = TRUE, colorEdge=TRUE) + scale_color_manual(values = brewer.pal(2,"Set1")) 
+dev.off()
+
+cnetplot(ekg, node_label="all", showCategory = 5,circular = FALSE, colorEdge=TRUE)
+```
+
+
+```{r}
+select_GO_term <- c("Ras protein signal transduction", "myeloid cell differentiation", "erythrocyte differentiation", "regulation of MAP kinase activity", "myeloid cell homeostasis", "erythrocyte homeostasis", "positive regulation of cell morphogenesis involved in differentiation", "homeostasis of number of cells", "coagulation", "regulation of granulocyte differentiation")
+
+crc_mut.ego_bp<-Enricher.crc_mut$ego_bp[Enricher.crc_mut$ego_bp$Description %in% select_GO_term, c("Description", "qvalue")]
+crc_mut.ego_bp$Label  <- "GO_BP"
+
+kaka_12.3 <- ggplot(crc_mut.ego_bp,aes(y=fct_reorder(Description, -log(qvalue)),x=Label)) + geom_point(aes(size=-log10(qvalue)), color = brewer.pal(8, "BuGn")[8]) + blank + theme(panel.border = element_rect(fill = NA, linetype = 1, size = 1), axis.line = element_blank())
+
+kaka_12.3
+
+pdf("~/kaka_12.3.pdf", width = 6, height = 4, useDingbats = FALSE)
+kaka_12.3
+dev.off()
+```
+
+##Part IX WT1 CRE KO RNAseq
+###01. input analysis result
+```{r}
+WT1_cre_ko <- read.table("/Volumes/TCGA-2/ondriverFML/10.WT1_CRE_KO/WT1-cas9-1.vs.NB4-vec.DESeq2.all.xls",  sep = "\t", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+WT1_cre_ko$Entrez <- TransGeneID(WT1_cre_ko$Symbol, "Symbol", "Entrez", organism = "hsa")
+dim(WT1_cre_ko)
+```
+
+###02. Gene enrichment analysis 
+```{r}
+WT1_cre_ko.up <- WT1_cre_ko[WT1_cre_ko$log2FoldChange > log2(1.5)  & WT1_cre_ko$padj < 0.05, "Entrez"]
+WT1_cre_ko.down <- WT1_cre_ko[WT1_cre_ko$log2FoldChange < -log2(1.5)  & WT1_cre_ko$padj < 0.05, "Entrez"]
+WT1_cre_ko.up <- na.omit(WT1_cre_ko.up)
+WT1_cre_ko.down <- na.omit(WT1_cre_ko.down)
+length(WT1_cre_ko.up)
+length(WT1_cre_ko.down)
+
+WT1_cre_ko.deg <- c(WT1_cre_ko.down,WT1_cre_ko.up)
+
+WT1_cre_ko.up.all <- WT1_cre_ko[WT1_cre_ko$log2FoldChange > log2(1.5)  & WT1_cre_ko$padj < 0.05,]
+WT1_cre_ko.down.all <- WT1_cre_ko[WT1_cre_ko$log2FoldChange < -log2(1.5)  & WT1_cre_ko$padj < 0.05,]
+
+#write.table(WT1_cre_ko.up.all,"~/WT1_cre_ko.up.txt", row.names = FALSE, quote = FALSE, sep= "\t")
+#write.table(WT1_cre_ko.down.all,"~/WT1_cre_ko.down.txt", row.names = FALSE, quote = FALSE, sep= "\t")
+```
+
+```{r}
+Enricher.ko_up <- enrich_combind(WT1_cre_ko.up,0.5,0.5)
+enricher_plot(Enricher.ko_up,1:5,1:5,1:5,1:5,1:5,5) + ggtitle("WT1 CRE KO up-deg")
+Enricher.ko_down <- enrich_combind(WT1_cre_ko.down,0.5,0.5)
+enricher_plot(Enricher.ko_down,1:5,1:5,1:5,1:5,1:5,5) + ggtitle("WT1 CRE KO down-deg")
+Enricher.ko_deg <- enrich_combind(WT1_cre_ko.deg,0.5,0.5)
+enricher_plot(Enricher.ko_deg,1:5,1:5,1:5,1:5,1:5,5) + ggtitle("WT1 CRE KO all-deg")
+```
+
+###03. GSEA
+```{r}
+WT1_cre_ko.geneList <- WT1_cre_ko$log2FoldChange
+names(WT1_cre_ko.geneList) <- WT1_cre_ko$Entrez
+WT1_cre_ko.geneList <- sort(WT1_cre_ko.geneList, decreasing = TRUE)
+```
+
+```{r}
+WT1_cre_ko.kk2 <- gseKEGG(geneList     = WT1_cre_ko.geneList,
+               organism     = 'hsa',
+               nPerm        = 1000,
+               minGSSize    = 120,
+               pvalueCutoff = 0.5,
+               verbose      = FALSE)
+head(WT1_cre_ko.kk2)
+```
+
+##Part Subplement: Build Function
+```{r}
+blank <-  theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"), panel.background = element_blank())
+```
+
+
+##Part Library: Loading R package
+```{r}
+library(ChIPseeker)
+library(ggplot2)
+library(RColorBrewer)
+library(cowplot)
+library(TxDb.Hsapiens.UCSC.hg38.knownGene)
+```
+
+```{r}
+#save.image(file="/mnt5/APL_H3K27ac_WangLab/ChIPseq_plot.RData")
+#load("/mnt5/APL_H3K27ac_WangLab/ChIPseq_plot.RData")
+```

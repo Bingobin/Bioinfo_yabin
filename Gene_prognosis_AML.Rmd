@@ -1,0 +1,251 @@
+---
+title: "Untitled"
+author: "Yabin Liu"
+date: "2020/9/2"
+output: html_document
+---
+
+```{r}
+aml_all_tpm.matrix <- read.table("/mnt5/BEAT_AML_RNAseq_count/06.count_merge_new/AML_merge.count2.tpm.txt",row.names = 1,header = TRUE,stringsAsFactors = FALSE)
+#aml_all_tpm.matrix <- read.table("/mnt5/BEAT_AML_RNAseq_count/06.count_merge_new/AML_merge.count2.br.tpm.txt",row.names = 1,header = TRUE,stringsAsFactors = FALSE)
+aml_all_wt1.tpm <- read.table("/mnt5/BEAT_AML_RNAseq_count/06.count_merge_new/AML_RNAseq.wt1.anno2.txt",header = TRUE,sep="\t",stringsAsFactors = FALSE)
+aml_all_wt1.clinc <- read.table("/mnt5/BEAT_AML_RNAseq_count/06.count_merge_new/AML_combind_clinical.process.txt",header = TRUE,sep="\t",stringsAsFactors = FALSE)
+aml_all_wt1.clinc<-merge(aml_all_wt1.tpm,aml_all_wt1.clinc, by.x=2,by.y=1, all=FALSE)
+aml_all_wt1.clinc <- data.table::as.data.table(aml_all_wt1.clinc)
+aml_all_wt1.clinc[,`:=`(IDH2,IDH2_p140 + IDH2_p172)]
+aml_all_wt1.clinc <- aml_all_wt1.clinc[! duplicated(aml_all_wt1.clinc$PatientId),]
+```
+
+```{r}
+#gene_os_plot("RBFOX2","TCGA",aml_all_tpm.matrix,aml_all_wt1.clinc)
+```
+
+##Part I: OS
+```{r}
+
+#gene_os_plot <- function(gene, source, tpm.matrix, clinic.df) {
+  gene <- "PABPN1"
+  source <- "BEAT"
+  group <- 2
+  tpm.matrix <- aml_all_tpm.matrix
+  clinic.df <- aml_all_wt1.clinc
+  express <- t(tpm.matrix[tpm.matrix$Symbol == gene,][5:length(tpm.matrix)])
+  colnames(express) <- "TPM"
+  rownames(express) <- gsub("\\.", "-", rownames(express))
+  os <- data.frame(Time=as.numeric(clinic.df$overallSurvival), vitalStatus=clinic.df$vitalStatus, Sample=clinic.df$SampleID, Source = clinic.df$Source.x, Type = clinic.df$Type)
+  os <- na.omit(os)
+  os$Status <- 0
+  os[os$vitalStatus == "Death",]$Status <- 1
+  os <- merge(express, os, by.x = 0, by.y = 3, all = FALSE)
+  os <- os[os$Source==source & os$Type == "Primary",]
+  if(group == 2){
+    os$Group <- "Above Median"
+    os[os[,2] <= median(os[,2]), ]$Group <- "Below Meidan"
+#    os$Group <- "Above Mean"
+#    os[os[,2] <= mean(os[,2]), ]$Group <- "Below Mean"
+  }else if(group == 3) {
+    quan.df <- quantile(os[,2], probs= seq(0,1,1/3))
+    os$Group <- "Low EXP"
+    os[os[,2] >= quan.df[[2]] & os[,2] <= quan.df[[3]], ]$Group <- "Middle EXP"
+    os[os[,2] > quan.df[[3]], ]$Group <- "High EXP"
+  }else if(group == 4){
+    quan.df <- quantile(os[,2])
+    os$Group <- "Q0"
+    os[os[,2] > quan.df[[2]] & os[,2] <= quan.df[[3]], ]$Group <- "Q1"
+    os[os[,2] > quan.df[[3]] & os[,2] <= quan.df[[4]], ]$Group <- "Q2"
+    os[os[,2] >= quan.df[[4]], ]$Group <- "Q3"
+  }
+  model <- coxph( Surv(Time, Status) ~ TPM, data = os)
+  summary(model)
+  ggforest(model)
+  fit <- survfit(Surv(Time/365, Status) ~ Group, data= os)
+
+  ggsurvplot(fit,palette = brewer.pal(8,"Dark2")[1:group],risk.table = TRUE,ncensor.plot=FALSE,pval=TRUE,conf.int = FALSE,xlab="Time in years") + 
+    ggtitle(paste0(gene, " OS in ", source))
+
+#}
+```
+
+```{r}
+pdf(paste0("~/", gene, "_OS_", source, ".pdf"))
+res.cut <- surv_cutpoint(os, time = "Time", event = "Status", variables = "TPM")
+summary(res.cut)
+plot(res.cut, "TPM", palette = brewer.pal(8,"Dark2")[1:2])
+res.cat <- surv_categorize(res.cut)
+fit <- survfit(Surv(Time/365, Status) ~TPM, data = res.cat)
+ggsurvplot(fit,palette = brewer.pal(8,"Dark2")[1:group],risk.table = TRUE,
+           ncensor.plot=FALSE,pval=TRUE,conf.int = FALSE, xlab="Time in years") + 
+    ggtitle(paste0(gene, " OS in ", source))
+dev.off()
+```
+
+##Part II: Expression based on NEJM_2016
+
+```{r}
+#express
+classfi <- data.frame(Sample=clinic.df$SampleID,Classification=clinic.df$NEJM_2016, Source = clinic.df$Source.x)
+classfi <- merge(express, classfi, by.x = 0, by.y = 1, all = FALSE)
+aml_norm.df <-aml_all_wt1.tpm %>% filter(Type == "Normal") 
+aml_norm.df <- data.frame(Sample=aml_norm.df$SampleID, Classification=aml_norm.df$Tissue, Source=aml_norm.df$Source)
+aml_norm.df <- merge(express, aml_norm.df, by.x = 0, by.y = 1, all = FALSE)
+
+classfi <- rbind(classfi, aml_norm.df)
+
+classfi <- classfi[classfi$Source==source,]
+
+classfi %>% group_by(Classification) %>% summarise(num=n())
+```
+
+
+```{r}
+#library(ggplot2)
+#library(ggpubr)
+#library(RColorBrewer)
+#aml_all_wt1.tpm$Source2 <- factor(aml_all_wt1.tpm$Source2, levels=c("BEAT","TARGET","TCGA","CD2017","CD34","MNC"))
+pdf(paste0("~/", gene, "_EX_", source, ".pdf"),height = 5, width = 6, useDingbats = FALSE)
+my_comparisons <- lapply(levels(classfi$Classification)[1:13], function(x){
+  c(x,levels(classfi$Classification)[15])
+})
+x<-"t15_17"
+my_comparisons <- list(c(x,"CD34"),c(x,"MNC"))
+
+
+ggplot(classfi,aes(x=Classification,y=log2(TPM),color=Classification)) + 
+  geom_boxplot(outlier.shape = NA,show.legend = FALSE) + 
+  geom_jitter(size=0.5,show.legend = FALSE) + 
+  theme(panel.border = element_rect(fill=NA,linetype = 1),
+        panel.background = element_blank()) + 
+  scale_color_manual(values = c(brewer.pal(9,"Blues")[5:8],brewer.pal(9,"Greens")[5:8],brewer.pal(9,"Reds")[5:9],"grey50","black")) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), plot.title= element_text(hjust = 0.5)) + 
+  stat_compare_means(show.legend = FALSE, comparisons = my_comparisons, label = "p.signif") +
+  stat_compare_means(show.legend = FALSE) +
+  ggtitle(paste0(gene, " Expression"))  
+dev.off()
+```
+
+
+##Part III: Expression based on Genomic Events
+
+```{r}
+#express
+event <-"t8_21"
+#event <- "inv16"
+#event <- "RUNX1"
+#event <-"WT1"
+classfi.event <- clinic.df[.(1), on = event, .(SampleID,Source.x)]
+classfi.event$Classification <- event
+
+classfi.nk <- clinic.df[.(0,1), on = c("RUNX1","normal"), .(SampleID,Source.x)]
+classfi.nk$Classification <- "NK"
+
+#classfi.nk <- clinic.df[.(0), on = event, .(SampleID,Source.x)]
+#classfi.nk$Classification <- "Non"
+
+classfi.nm <- aml_all_wt1.tpm %>% filter(Type == "Normal") 
+classfi.nm <- data.frame(Sample=classfi.nm$SampleID, Source=rep(source,nrow(classfi.nm)),Classification=classfi.nm$Tissue)
+
+classfi.2 <- rbind(classfi.event, classfi.nk)
+colnames(classfi.2) <- c("Sample","Source","Classification")
+classfi.2 <- rbind(classfi.2, classfi.nm)
+classfi.2 <- merge(express, classfi.2, by.x = 0, by.y = 1, all = FALSE)
+#classfi.2 <- classfi.2[classfi.2$Source==source,]
+classfi.2 <- classfi.2[classfi.2$Source %in% c("BEAT", "TCGA"),]
+classfi.2 %>% group_by(Classification) %>% summarise(num=n())
+```
+
+```{r}
+my_comparisons <- lapply(levels(classfi.2$Classification)[2:ncol(classfi.2)], function(x){
+  c(levels(classfi.2$Classification)[1],x)
+})
+#pdf("~/tmp3.pdf",height = 5, width = 3)
+p<-ggplot(classfi.2,aes(x=Classification,y=log2(TPM),color=Classification)) + 
+  geom_boxplot(outlier.shape = NA,show.legend = FALSE) + 
+  geom_jitter(size=0.5,show.legend = FALSE) + 
+  theme(panel.border = element_rect(fill=NA,linetype = 1),
+        panel.background = element_blank()) + 
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5), plot.title= element_text(hjust = 0.5)) + 
+  scale_color_manual(values = c("#FF7F00","#1F78B4","grey50","black")) +
+  stat_compare_means(show.legend = FALSE, comparisons = my_comparisons) +
+# , label = "p.signif"
+#  stat_compare_means(show.legend = FALSE) +
+  ggtitle(paste0(gene, " Expression")) + xlab("")
+
+p
+#dev.off()
+```
+
+```{r}
+classfi.t8_21 <- clinic.df[.(1), on = "t8_21", .(SampleID,Source.x)]
+classfi.t8_21$Classification <- "t8_21"
+classfi.inv16 <- clinic.df[.(1), on = "inv16", .(SampleID,Source.x)]
+classfi.inv16$Classification <- "inv16"
+classfi.RUNX1 <- clinic.df[.(1), on = "RUNX1", .(SampleID,Source.x)]
+classfi.RUNX1$Classification <- "RUNX1"
+classfi.nk <- clinic.df[.(0,1), on = c("RUNX1","normal"), .(SampleID,Source.x)]
+classfi.nk$Classification <- "NK"
+classfi.nm <- aml_all_wt1.tpm %>% filter(Type == "Normal") 
+classfi.nm <- data.frame(Sample=classfi.nm$SampleID, Source=rep(source,nrow(classfi.nm)),Classification=classfi.nm$Tissue)
+classfi.2 <- rbind(classfi.t8_21, classfi.inv16)
+classfi.2 <- rbind(classfi.2, classfi.RUNX1)
+classfi.2 <- rbind(classfi.2, classfi.nk)
+colnames(classfi.2) <- c("Sample","Source","Classification")
+classfi.2 <- rbind(classfi.2, classfi.nm)
+classfi.2 <- merge(express, classfi.2, by.x = 0, by.y = 1, all = FALSE)
+classfi.2 <- classfi.2[classfi.2$Source %in% c("BEAT", "TCGA"),]
+classfi.2 %>% group_by(Classification) %>% summarise(num=n())
+```
+```{r}
+
+my_comparisons <- lapply(rev(levels(classfi.2$Classification)[1:3]), function(x){
+  c(x,levels(classfi.2$Classification)[4])
+})
+
+pdf("~/tmp3.pdf",height = 5, width = 5, useDingbats = FALSE)
+p<-ggplot(classfi.2,aes(x=Classification,y=log2(TPM),color=Classification)) + 
+  geom_boxplot(outlier.shape = NA,show.legend = FALSE) + 
+  geom_jitter(size=0.5,show.legend = FALSE) + 
+  theme(panel.border = element_rect(fill=NA,linetype = 1),
+        panel.background = element_blank()) + 
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5), plot.title= element_text(hjust = 0.5)) + 
+  scale_color_manual(values = c("#FF7F00","#984EA3","#4DAF4A","#1F78B4","grey50","black")) +
+  stat_compare_means(show.legend = FALSE, comparisons = my_comparisons) +
+# , label = "p.signif"
+#  stat_compare_means(show.legend = FALSE) +
+  ggtitle(paste0(gene, " Expression")) + xlab("")
+p
+dev.off()
+```
+
+
+
+
+
+##test
+```{r}
+data(myeloma)
+head(myeloma)
+res.cut <- surv_cutpoint(myeloma, time = "time", event = "event", variables = c("DEPDC1", "WHSC1", "CRIM1"))
+summary(res.cut)
+plot(res.cut, "DEPDC1", palette = "npg")
+res.cat <- surv_categorize(res.cut)
+fit <- survfit(Surv(time, event) ~DEPDC1, data = res.cat)
+ggsurvplot(fit,palette = brewer.pal(8,"Dark2")[1:2],risk.table = TRUE,ncensor.plot=FALSE,pval=TRUE,conf.int = FALSE,xlab="Time in years")
+```
+```{r}
+ggplot(myeloma,aes(x=DEPDC1)) +  xlim(50,600) + geom_histogram(color="white")
+```
+
+```{r}
+mod <- maxstat::maxstat.test(y ~ x, data=mydata, smethod="Wilcoxon", pmethod="HL",
+                    minprop=0.25, maxprop=0.75, alpha=0.05)
+print(mod)
+plot(mod)
+
+mstat<-maxstat::maxstat.test(Surv(time, event) ~DEPDC1,data=myeloma, smethod="LogRank", pmethod="exactGauss",abseps=0.01)
+plot(mstat)
+```
+
+```{r}
+#save.image(file="/data/liuyabin/lyb_proj_20200717/Gene_prognosis_AML.RData")
+#load("/data/liuyabin/lyb_proj_20200717/Gene_prognosis_AML.RData")
+```

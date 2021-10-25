@@ -1,0 +1,182 @@
+---
+title: "AML1_ETO_corr"
+author: "Yabin Liu"
+date: "2020/8/18"
+output: html_document
+---
+
+
+##01.TPM matrx & clinical data input
+```{r}
+aml_all_tpm.matrix <- read.table("/mnt5/BEAT_AML_RNAseq_count/06.count_merge_new/AML_merge.count2.br.tpm.txt",row.names = 1,header = TRUE,stringsAsFactors = FALSE)
+aml_all_wt1.tpm <- read.table("/mnt5/BEAT_AML_RNAseq_count/06.count_merge_new/AML_RNAseq.wt1.anno2.txt",header = TRUE,sep="\t",stringsAsFactors = FALSE)
+#aml_all_wt1.tpm$WT1_tpm <- aml_all_wt1.tpm$WT1_br2
+aml_all_wt1.clinc <- read.table("/mnt5/BEAT_AML_RNAseq_count/06.count_merge_new/AML_combind_clinical.process.txt",header = TRUE,sep="\t",stringsAsFactors = FALSE)
+aml_all_wt1.clinc<-merge(aml_all_wt1.tpm,aml_all_wt1.clinc, by.x=2,by.y=1, all=FALSE)
+aml_all_wt1.clinc <- aml_all_wt1.clinc[! duplicated(aml_all_wt1.clinc$PatientId),]
+```
+
+##02.extract  AML tpm
+
+```{r}
+aml_all_tpm.matrix <- aml_all_tpm.matrix[!duplicated(aml_all_tpm.matrix$Symbol),]
+rownames(aml_all_tpm.matrix) <- aml_all_tpm.matrix$Symbol
+```
+
+###AML1-ETO AML
+```{r}
+aml_all_wt1.clinc.AE <- aml_all_wt1.clinc %>% filter(t8_21 == 1)
+aml_all_wt1.clinc.AE$SampleID <- gsub("-","\\.",aml_all_wt1.clinc.AE$SampleID)
+aml_all_tpm.matrix.AE<-aml_all_tpm.matrix[,c("Symbol",aml_all_wt1.clinc.AE$SampleID)]
+```
+
+###CBFB-MYH11 AML
+```{r}
+aml_all_wt1.clinc.inv16 <- aml_all_wt1.clinc %>% filter(inv16 == 1)
+aml_all_wt1.clinc.inv16$SampleID <- gsub("-","\\.",aml_all_wt1.clinc.inv16$SampleID)
+aml_all_tpm.matrix.inv16<-aml_all_tpm.matrix[,c("Symbol",aml_all_wt1.clinc.inv16$SampleID)]
+```
+
+###Normal-Karyotype  AML
+```{r}
+aml_all_wt1.clinc.NK <- aml_all_wt1.clinc %>% filter(normal == 1)
+aml_all_wt1.clinc.NK$SampleID <- gsub("-","\\.",aml_all_wt1.clinc.NK$SampleID)
+aml_all_tpm.matrix.NK<-aml_all_tpm.matrix[,c("Symbol",aml_all_wt1.clinc.NK$SampleID)]
+```
+
+##03.corr
+```{r}
+ccor_paired_gene <- function(EXdata,Gene1,Gene2){
+#  EXdata<-aml_all_tpm.matrix
+#  Gene1 <- "TET2"
+#  Gene2 <- "TP53"
+##########################
+#           Symbol Length           Type    BA2000    BA2003      BA2004
+#TSPAN6     TSPAN6   4535 protein_coding   0.00000  1.016602   0.3353875
+#TNMD         TNMD   1610 protein_coding   0.00000  0.000000   0.0000000
+########################
+  corr.df <- data.frame(Gene1=log2(as.numeric(EXdata[Gene1,2:ncol(EXdata)])+1),Gene2=log2(as.numeric(EXdata[Gene2,2:ncol(EXdata)])+1))
+  corr.result <- cor.test(~Gene1 + Gene2,corr.df,method="pearson")
+  text<-paste("k=",round(lm( Gene1~Gene2, corr.df)$coefficients[2],4),",","r=",round(corr.result$estimate,4), sep = "")
+  pv <- corr.result$p.value
+  if (pv < 0.05 & pv > 0.01){sig="*"}else if(pv < 0.01 & pv > 0.001){sig="**"}else if(pv < 0.001 & pv > 0.0001){sig="***"}else if(pv < 0.0001){sig="****"}else{sig="na"}
+  blank <- theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"), panel.background = element_blank())
+  ggplot(corr.df,aes(y=Gene2,x=Gene1)) + 
+    geom_point(size = 1, alpha = 0.5, color = "grey") + 
+    geom_smooth(method = "lm", se = TRUE,formula = y ~ x) + ggtitle(text)  +  
+    annotate("text",label=sig, 
+             y=max(corr.df$Gene2,na.rm = TRUE),
+             x=median(corr.df[corr.df$Gene1 != 0,]$Gene1,na.rm = TRUE), size=7)  + 
+    xlab(Gene1) + ylab(Gene2) + blank
+}
+```
+
+```{r}
+#gene_list <- c("RUNX1T1","RUNX1","HDAC1","HDAC2","HDAC3","EP300","JMJD1C","CBFB","MYH11","FLI1","ERG","GATA2","SPI1","NCOR1","NCOR2","TAF3","TAF1","TCF12","TCF3","SIN3A", "SAP130", "SUDS3", "ARID4B")
+gene_list<- c("TBP","LMO2", "POLR2A", "CEBPA")
+gene_list[!gene_list %in% rownames(aml_all_tpm.matrix.AE)]
+```
+
+###AML1-ETO AML
+```{r}
+#library(ggplot2)
+#library(cowplot)
+df_ls <- lapply(gene_list, function(x){
+  ccor_paired_gene(aml_all_tpm.matrix.AE,x, "BCAT1")
+})
+pdf("~/tmp1.pdf",width = 3*4,height = 3.5)
+plot_grid(plotlist=df_ls,ncol = 4)
+#df_ls
+dev.off()
+```
+
+###CBFB-MYH11 AML
+```{r}
+df_ls <- lapply(gene_list, function(x){
+  ccor_paired_gene(aml_all_tpm.matrix.inv16,x, "BCAT1")
+})
+
+pdf("~/tmp2.pdf",width = 3*4,height = 3.5)
+plot_grid(plotlist=df_ls,ncol = 4)
+#df_ls
+dev.off()
+
+```
+
+###NK AML
+```{r}
+df_ls <- lapply(gene_list, function(x){
+  ccor_paired_gene(aml_all_tpm.matrix.NK,x, "BCAT1")
+})
+
+pdf("~/tmp3.pdf",width = 3*4,height = 3.5)
+plot_grid(plotlist=df_ls,ncol = 4)
+#df_ls
+dev.off()
+```
+
+```{r}
+ccor_paired_gene(aml_all_tpm.matrix.AE, "MSI2", "BCAT1") + xlab("MSI2 in AE")
+ccor_paired_gene(aml_all_tpm.matrix.inv16, "MSI2", "BCAT1") + xlab("MSI2 in inv16")
+ccor_paired_gene(aml_all_tpm.matrix.NK, "MSI2", "BCAT1") + xlab("MSI2 in NK")
+```
+
+
+##04.BCAT1 OS
+```{r}
+aml_all_wt1.clinc$SampleID <- gsub("-","\\.",aml_all_wt1.clinc$SampleID)
+row.index <- match("BCAT1",aml_all_tpm.matrix$Symbol)
+clo.index <- match(aml_all_wt1.clinc$SampleID,colnames(aml_all_tpm.matrix))
+aml_all_tpm.BCAT1 <- aml_all_tpm.matrix[row.index,clo.index]
+rownames(aml_all_tpm.BCAT1) <- "BCAT1_tpm"
+aml_all_tpm.BCAT1 <- as.data.frame(t(aml_all_tpm.BCAT1))
+aml_all_wt1.clinc$BCAT1_tpm <- aml_all_tpm.BCAT1$BCAT1_tpm
+```
+```{r}
+
+#library(dplyr)
+#library(survival)
+#library(survminer)
+#library(RColorBrewer)
+aml_clinic <- aml_all_wt1.clinc %>% filter(vitalStatus != "Unknown" & Source.x != "TARGET")
+aml_clinic$overallSurvival <- as.numeric(aml_clinic$overallSurvival)
+aml_clinic <- aml_clinic %>% filter(overallSurvival > 0) 
+aml_clinic$Status <- 0
+aml_clinic[aml_clinic$vitalStatus == "Death",]$Status <- 1
+
+aml_clinic$Group <- "BCAT1_HIGH"
+aml_clinic[aml_clinic$BCAT1_tpm < median(aml_clinic$BCAT1_tpm),]$Group <- "BCAT1_LOW"
+aml_clinic %>% group_by(Status,Group) %>% summarise(n()) 
+
+
+
+pretty_aml <- aml_clinic %>%
+  transmute(time=as.numeric(overallSurvival),
+            status=Status,
+            Age = as.numeric(ageAtDiagnosis),
+            Sex = factor(Sex),
+            WT1 = factor(WT1),
+            FLT3_ITD = factor(FLT3_ITD),
+            CEBPA_bi = factor(CEBPA_bi),
+            NPM1 = factor(NPM1),
+            DNMT3A = factor(DNMT3A),
+            NEJM2016 = factor(NEJM_2016),
+            ELN2017 = factor(ELN2017_Myclass),
+            Group = factor(Group),
+            BCAT1_expression = BCAT1_tpm
+            )
+#pdf("~/tmp1.pdf",width = 8,height = 6)
+model <- coxph( Surv(time, status) ~ Group, data = pretty_aml)
+ggforest(model)
+
+fit <- survfit(Surv(time/365, status) ~ Group, data= pretty_aml)
+ggsurvplot(fit,palette = brewer.pal(2,"Paired"),risk.table = TRUE,ncensor.plot=FALSE,pval=TRUE,conf.int = FALSE,xlab="Time in years")
+#dev.off()
+```
+```{r}
+pdf("~/tmp0.pdf",width = 18,height = 6)
+model <- coxph( Surv(time, status) ~ BCAT1_expression, data = pretty_aml)
+ggforest(model)
+dev.off()
+```
+

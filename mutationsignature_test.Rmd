@@ -1,0 +1,816 @@
+---
+title: "SomaticSignature"
+author: "Yabin Liu"
+date: "2018/11/16"
+output: html_document
+---
+
+##Example of the package SomaticSignatures
+```{r, echo=FALSE, include=FALSE}
+library("BSgenome.Hsapiens.UCSC.hg38")
+library("BSgenome.Hsapiens.1000genomes.hs37d5")
+library("SomaticSignatures")
+library("SomaticCancerAlterations")
+library("ggplot2")
+library("RColorBrewer")
+```
+
+```{r}
+sca_metadata = scaMetadata()
+sca_data = unlist(scaLoadDatasets())
+sca_data$study = factor(gsub("(.*)_(.*)", "\\1", toupper(names(sca_data))))
+sca_data = unname(subset(sca_data, Variant_Type %in% "SNP"))
+sca_data = keepSeqlevels(sca_data, hsAutosomes(), pruning.mode = "coarse")
+sca_vr = VRanges(
+  seqnames = seqnames(sca_data),
+  ranges = ranges(sca_data),
+  ref = sca_data$Reference_Allele,
+  alt = sca_data$Tumor_Seq_Allele2,
+  sampleNames = sca_data$Patient_ID,
+  seqinfo = seqinfo(sca_data),
+  study = sca_data$study)
+
+sort(table(sca_vr$study), decreasing = TRUE)
+```
+
+```{r}
+sca_motifs = mutationContext(sca_vr, BSgenome.Hsapiens.1000genomes.hs37d5)
+sca_mm = motifMatrix(sca_motifs, group = "study", normalize = TRUE)
+plotMutationSpectrum(sca_motifs, "study") 
+```
+
+```{r}
+n_sigs = 5
+sigs_nmf = identifySignatures(sca_mm, n_sigs, nmfDecomposition)
+sigs_pca = identifySignatures(sca_mm, n_sigs, pcaDecomposition)
+
+```
+
+##SomaticSignatures analysis
+```{r 建立Grange对象}
+APL_snv <- read.table(file = "/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/02.maftools/WL1109_APL_D0_wgs_mutation.mask.maf", header = TRUE)
+APL_snv <- subset(APL_snv, Variant_Type == 'SNP')
+APL_gr <- GRanges(
+    seqnames = Rle(APL_snv$Chromosome),
+    ranges =  IRanges(start=APL_snv$Start_Position, end=APL_snv$Start_Position),
+    strand =Rle(rep("*",nrow(APL_snv))), 
+    ref = APL_snv$Reference_Allele,
+    alt = APL_snv$Tumor_Seq_Allele2,
+    sample = APL_snv$Tumor_Sample_Barcode,
+    study = APL_snv$Center)
+APL_gr
+```
+
+```{r 建立Vrange对象}
+APL_vr = VRanges(
+  seqnames = seqnames(APL_gr),
+  ranges = ranges(APL_gr),
+  ref = APL_gr$ref,
+  alt = APL_gr$alt,
+  sampleNames = APL_gr$sample,
+  seqinfo = seqinfo(APL_gr),
+  study = APL_gr$sample)
+
+sort(table(APL_vr$study), decreasing = TRUE)
+```
+
+```{r 突变类型统计}
+APL_motifs = mutationContext(APL_vr, BSgenome.Hsapiens.UCSC.hg38)
+APL_mm = motifMatrix(APL_motifs, group = "study", normalize = TRUE)
+```
+```{r 画突变图，当样品数过多时，可利用函数colorRampalette}
+cols = colorRampPalette(brewer.pal(12, "Set3"))
+myPal <- cols(min(dim(APL_mm)))
+plotMutationSpectrum(APL_motifs, "study", colorby = "alteration") 
+P <- plotMutationSpectrum(APL_motifs, "study") + scale_fill_manual(values = myPal)
+P + theme(axis.text.x = element_text(size = 12), axis.text.y = element_text(size = 12))
+```
+```{r 评估sig数目}
+n_sigs = 2:16
+gof_nmf = assessNumberSignatures(APL_mm, n_sigs, nReplicates = 5)
+gof_pca = assessNumberSignatures(APL_mm, n_sigs, pcaDecomposition)
+```
+```{r}
+plotNumberSignatures(gof_nmf)
+plotNumberSignatures(gof_pca)
+```
+
+```{r}
+n_sigs = 3
+
+sigs_nmf = identifySignatures(APL_mm, n_sigs, nmfDecomposition)
+sigs_nmf
+
+sigs_pca = identifySignatures(APL_mm, n_sigs, pcaDecomposition)
+sigs_pca
+```
+```{r}
+plotSignatureMap(sigs_nmf) + ggtitle("Somatic Signatures: NMF - Heatmap")
+SomaticSignatures::plotSignatures(sigs_nmf) + ggtitle("Somatic Signatures: NMF - Barchart")
+plotSampleMap(sigs_nmf)
+plotSamples(sigs_nmf)
+plotSignatures(sigs_pca) + ggtitle("Somatic Signatures: PCA - Barchart")
+plotFittedSpectrum(sigs_nmf)  + scale_fill_manual(values = myPal)
+ 
+pheatmap(mat = sigs_nmf@samples, cluster_cols = FALSE ,color = colorRampPalette(brewer.pal(n = 7, name =
+  "Purples"))(100),cluster_rows = TRUE) + scale_fill_manual("#8DD3C7", "#CFECBB")
+```
+
+```{r}
+clu_motif = clusterSpectrum(APL_mm, "motif")
+library(ggdendro)
+ggdendrogram(clu_motif, rotate = TRUE)
+```
+
+##Maftools extract protain domain
+```{r}
+library("maftools")
+library("dplyr")
+gff = readRDS(file = system.file('extdata', 'protein_domains.RDs', package = 'maftools'))
+filter(gff, HGNC %in% "TET2")
+protein_inform <- filter(gff, HGNC %in% "PML") %>% filter(protein.ID == "NP_150241")
+
+```
+##Example of the package Maftools
+```{r}
+laml.maf = system.file("extdata", "tcga_laml.maf.gz", package = 'maftools')
+laml.clin = system.file('extdata', 'tcga_laml_annot.tsv', package = 'maftools')
+all.lesions <- system.file("extdata", "all_lesions.conf_99.txt", package = "maftools")
+amp.genes <- system.file("extdata", "amp_genes.conf_99.txt", package = "maftools")
+del.genes <- system.file("extdata", "del_genes.conf_99.txt", package = "maftools")
+scores.gis <- system.file("extdata", "scores.gistic", package = "maftools")
+laml = read.maf(maf = laml.maf, clinicalData = laml.clin)
+laml.plus.gistic = read.maf(maf = laml.maf, gisticAllLesionsFile = all.lesions, gisticAmpGenesFile = amp.genes, gisticDelGenesFile = del.genes, gisticScoresFile = scores.gis, isTCGA = TRUE)
+```
+
+
+##Maftools Analysis
+```{r echo=FALSE, include=FALSE}
+library("maftools")
+wl1109_wgs <- read.maf(maf = "/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/02.maftools/WL1109_APL_D0_wgs_mutation.mask.maf", clinicalData = "/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/02.maftools/WL1109_APL_D0_wgs_clinical.txt", cnTable = "/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/04.cnv_merge/WL1109_wgs_cnv_maftools.txt")
+
+```
+
+```{r}
+col <- brewer.pal(n=10, name="Paired")
+names(col) = c('Frame_Shift_Del','Missense_Mutation', 'Nonsense_Mutation', 'Multi_Hit', 'Frame_Shift_Ins', 'In_Frame_Ins', 'Splice_Site', 'In_Frame_Del', "Amp", "Del")
+
+plotmafSummary(maf = wl1109_wgs, color=col,rmOutlier = TRUE, addStat = 'median', dashboard = TRUE, titvRaw = FALSE)
+```
+```{r}
+oncoplot(maf = wl1109_wgs, top = 20, genes = c('FLT3', 'NRAS', 'WT1', 'ALMS1'), genesToIgnore=NULL,fontSize = 12,showTumorSampleBarcodes=TRUE)
+
+lollipopPlot(maf = wl1109_wgs, gene = 'FLT3', AACol = 'Protein_Change', showMutationRate = TRUE)
+geneCloud(input = wl1109_wgs, minMut = 4)
+```
+
+```{r}
+Gendercol = brewer.pal(n=3, name="Pastel1")
+names(Gendercol) = c('female', 'male', 'unknown')
+Gendercol = list(Gender = Gendercol)
+
+PRcol = c("#CCEBC5","#DECBE4")
+names(PRcol) = c('L', 'S')
+PRcol = list(PR = PRcol)
+
+Procol = brewer.pal(n=4, name="Dark2")
+names(Procol) = c('CR', 'RL', 'ED', 'MDS')
+Procol = list(Prognosis = Procol)
+```
+```{r}
+oncoplot(maf = wl1109_wgs,  color=col, clinicalFeatures = c('Gender', 'PR', 'Prognosis'),  annotationColor = c(Gendercol,PRcol, Procol), top = 54, genesToIgnore=c('FLG2', 'MUC17', 'AHNAK2', 'MUC5AC', 'ALMS1', 'GOLGA6L6', 'MUC12', 'MUC3A', 'RPTN', 'ZAN', 'ACAN', 'FLG', 'GOLGA6L2', 'LOC100129697', 'MST1L', 'MUC16', 'PLIN4', 'PRAMEF1', 'TCHH','AHNAK','ANKRD36', 'ANKRD20A4', 'ARMCX4', 'C2orf16', "TEX13C", 'CHD7', 'CNTN5', 'CRIPAK', "CRYBG2", 'FMN2', 'HRNR', 'IGFN1','IVL', 'KLRC2'),fontSize = 15,SampleNamefontSize = 15, titleFontSize = 20, legendFontSize = 15, annotationFontSize = 15, annotationTitleFontSize = 15, showTumorSampleBarcodes=TRUE)
+
+oncoplot(maf = wl1109_wgs,  color=col, clinicalFeatures = c('Gender', 'PR', 'Prognosis'),  annotationColor = c(Gendercol,PRcol, Procol),genes = c('FLT3', 'NRAS', 'WT1', 'FAM186A', 'KRTAP10-6', 'ZNF91', 'ZNF208'),showTumorSampleBarcodes=TRUE)
+```
+
+##maftools Heterogeneity and MATH analysis
+```{r}
+DGB_d0.het = inferHeterogeneity(maf = wl1109_wgs, tsb = 'DGB_D0', vafCol = 'TumorVAF',useSyn = FALSE,ignChr=c("chrX","chrY","chrM"))
+plotClusters(clusters = DGB_d0.het)
+
+DGB_maf <- read.maf(maf = "/Users/liuyabin/Desktop/DGB_WGS/DGB_wgs_mutation.mutect2.rm.maf")
+DGB_d0.het = inferHeterogeneity(maf = DGB_maf, tsb = 'DGB_D0', vafCol = 'TumorVAF',useSyn = FALSE,ignChr=c("chrX","chrY","chrM"))
+plotClusters(clusters = DGB_d0.het)
+
+DGB_rl.het = inferHeterogeneity(maf = DGB_maf, tsb = 'DGB_RL0313', vafCol = 'TumorVAF',useSyn = FALSE,ignChr=c("chrX","chrY","chrM"))
+plotClusters(clusters = DGB_rl.het)
+```
+
+
+##Cov depth plot
+```{r}
+library("GenVisR")
+wgs_mn_cov <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/03.cov_dep/WL1109_wgs_MN_covbar.txt", header = TRUE, row.names = 1)
+wgs_mn_cov <- as.data.frame(wgs_mn_cov)
+covBars(wgs_mn_cov)
+
+wgs_d0_cov <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/03.cov_dep/WL1109_wgs_D0_covbar.txt", header = TRUE, row.names = 1)
+wgs_d0_cov <- as.data.frame(wgs_d0_cov)
+covBars(wgs_d0_cov)
+```
+
+##Depth bar plot
+```{r}
+library("ggplot2")
+wgs_mn_depth <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/03.cov_dep/WL1109_wgs_MN_dep.stats", header = FALSE)
+wgs_d0_depth <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/03.cov_dep/WL1109_wgs_D0_dep.stats", header = FALSE)
+sample_list <- c('DJA', 'FHM', 'JMZ', 'LXH',  'LY', 'LYH', 'LZY', 'NYX', 'TFL', 'TJY', 'WJK', 'XHF', 'YY', 'ZLT', 'ZLY', 'PAJ', 'SRY', 'ZAL', 'DGB', 'CHH')
+wgs_mn_depth = data.frame(Sample = sample_list, Depth = wgs_mn_depth$V3, Type = rep("MN", 20))
+wgs_d0_depth = data.frame(Sample = sample_list, Depth = wgs_d0_depth$V3, Type = rep("D0", 20))
+wgs_depth_plot <- rbind(wgs_mn_depth, wgs_d0_depth)
+
+ggplot(data=wgs_depth_plot,aes(x=reorder(Sample,as.numeric(Depth)),y=Depth,fill=Type)) + geom_bar(stat = 'identity', position = "dodge", width = 0.6) + xlab("") + ylab("Depth") + ggtitle("Bar plot of Sequence Depth per Sample") + theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 0.5), plot.title = element_text(hjust = 0.5)) + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"), panel.background = element_blank()) + scale_fill_manual(values=c("#80B1D3","#FB8072")) + geom_text(mapping = aes(label = Depth), size= 3, colour= "black", vjust=-1,position = position_dodge(0.5), angle=30)
+```
+
+##Number of somatic  bar plor
+```{r}
+wl1109_wgs_stats <- read.table("/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/02.maftools/ALL_APL_wgs_mutation.sort.maf.stats", header = TRUE)
+wgs_snv = data.frame(Sample = wl1109_wgs_stats$Sample, Num = wl1109_wgs_stats$SNVs, Type = rep("SNVs", 32))
+wgs_indel = data.frame(Sample = wl1109_wgs_stats$Sample, Num = wl1109_wgs_stats$INDELs, Type = rep("INDELs", 32))
+
+wgs_somatics_plot <- rbind(wgs_snv, wgs_indel)
+P <- ggplot(data=wgs_somatics_plot,aes(x=reorder(Sample,as.numeric(Num)),y=Num,fill=Type)) + geom_bar(stat = 'identity', position = "dodge", width = 0.8) + xlab("") + ylab("log10 Number") + ggtitle("Num of Somatic Mutations per Sample") + theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1), plot.title = element_text(hjust = 0.5)) + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"), panel.background = element_blank()) + scale_fill_manual(values=c("#FDB462","#8DD3C7"))
+P + geom_text(mapping = aes(label = Num), size= 3, colour= "black", vjust=-1,position = position_dodge(0.5), angle=30) + theme(legend.position="top") + ylim(0,4500)
+P + geom_bar(stat = 'identity', width = 0.6) 
+
+```
+
+##maftools OncogenicPathways
+```{r}
+wl1109_wgs.titv = titv(maf = wl1109_wgs, plot =FALSE, useSyn = TRUE)
+plotTiTv(res = wl1109_wgs.titv)
+wl1109.mutload = tcgaCompare(maf = wl1109_wgs, cohortName = 'WL1109-APL')
+plotVaf(maf = wl1109_wgs, vafCol = 'i_TumorVAF_WU')
+
+somaticInteractions(maf = wl1109_wgs, gene = c("FLT3", "FAM186A", "KRTAP10-6", "NBPF10", "NBPF12", "ZNF208", "KRTAP10-4", "HYAL3", "OR2T34", "TXNDC2", "WT1", "ZDHHC11", "ZNF729", "ZNF91", "ZNF99", "DST", "KRTAP4-5", "MADCAM1", "NRAS", "ZNF697"), pvalue = c(0.05, 0.1))
+somaticInteractions(maf = wl1109_wgs, top=60,pvalue = c(0.05, 0.1) )
+
+wl1109_wgs.sig = oncodrive(maf = wl1109_wgs, AACol = 'Protein_Change', minMut = 5, pvalMethod = 'zscore')
+head(wl1109_wgs.sig)
+plotOncodrive(res = wl1109_wgs.sig, fdrCutOff = 0.1, useFraction = TRUE)
+dgi = drugInteractions(maf = wl1109_wgs, fontSize = 0.75)
+OncogenicPathways(maf = wl1109_wgs)
+PlotOncogenicPathways(maf = wl1109_wgs, pathways = "RTK-RAS")
+PlotOncogenicPathways(maf = wl1109_wgs, pathways = "TP53")
+PlotOncogenicPathways(maf = wl1109_wgs, pathways = "WNT")
+PlotOncogenicPathways(maf = wl1109_wgs, pathways = "NOTCH")
+```
+
+##Maftools somaticSignatures
+```{r}
+wl1109_wgs.tnm = trinucleotideMatrix(maf = wl1109_wgs,  ref_genome = "BSgenome.Hsapiens.UCSC.hg38")
+library('NMF')
+wl1109_wgs.sign = extractSignatures(mat = wl1109_wgs.tnm, nTry = 6, plotBestFitRes = FALSE)
+plotSignatures(wl1109_wgs.sign, title_size = 0.8 )
+
+library('pheatmap')
+pheatmap(mat = wl1109_wgs.sign$coSineSimMat, cluster_rows = FALSE, main = "cosine similarity against validated signatures")
+
+wl1109_wgs.se = signatureEnrichment(maf = wl1109_wgs, sig_res = wl1109_wgs.sign)
+plotEnrichmentResults(enrich_res = wl1109_wgs.se, pVal = 0.05)
+```
+
+```{r}
+dgb_d0.het = inferHeterogeneity(maf = wl1109_wgs, tsb = 'DGB_D0', segFile = "/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/02.maftools/cnv_seg/DGB_D0.seg.txt", vafCol = 'TumorVAF', useSyn=TRUE)
+plotClusters(clusters = dgb_d0.het)
+chh_d0.het = inferHeterogeneity(maf = wl1109_wgs, tsb = 'CHH_D0', segFile = "/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/02.maftools/cnv_seg/CHH_D0.seg.txt", vafCol = 'TumorVAF', useSyn=TRUE)
+plotClusters(clusters = chh_d0.het, genes = 'CN_altered', showCNvars = TRUE)
+#genes = 'CN_altered', showCNvars = TRUE
+
+sry_d0.het = inferHeterogeneity(maf = wl1109_wgs, tsb = 'SRY_D0', segFile = "/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/02.maftools/cnv_seg/SRY_D0.seg.txt", vafCol = 'TumorVAF', useSyn=TRUE)
+plotClusters(clusters = sry_d0.het, genes = 'CN_altered', showCNvars = TRUE)
+
+```
+
+##Maftools CNV plot
+```{r}
+plotCBSsegments(cbsFile = "/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/02.maftools/cnv_seg/TJY_D0.seg.txt")
+```
+
+##ComplexHeatmap display the mutation states
+```{r}
+library(ComplexHeatmap)
+library("RColorBrewer")
+mat=read.table("/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/plot/ALL_APL_wgs_mutation.oncoPrint.leukemiatop500.matrix", row.names = 1, header = TRUE, sep = "\t", stringsAsFactors = FALSE)
+
+alter_fun = list(
+    background = function(x, y, w, h) {
+        grid.rect(x, y, w-unit(0.5, "mm"), h-unit(0.5, "mm"), gp = gpar(fill = "#CCCCCC", col = NA))
+    },
+    AMP = function(x, y, w, h) {
+        grid.rect(x, y, w-unit(0.5, "mm"), h-unit(0.5, "mm"), gp = gpar(fill = brewer.pal(9,'Set1')[1], col = NA))
+    },
+    DEL = function(x, y, w, h) {
+        grid.rect(x, y, w-unit(0.5, "mm"), h-unit(0.5, "mm"), gp = gpar(fill = brewer.pal(9,'Set1')[2], col = NA))
+    },
+    PRM = function(x, y, w, h) {
+        grid.rect(x, y, w-unit(0.5, "mm"), h-unit(0.5, "mm"),gp = gpar(fill = brewer.pal(9,'Set1')[4], col = NA))
+    },
+    ENM = function(x, y, w, h) {
+        grid.rect(x, y, w-unit(0.5, "mm"), h-unit(0.5, "mm"), gp = gpar(fill = brewer.pal(9,'Set1')[5], col = NA))
+    },
+    MIM = function(x, y, w, h) {
+        grid.rect(x, y, w-unit(0.5, "mm"), h*0.33,  gp = gpar(fill = "black", col = NA))
+    },
+    TRM = function(x, y, w, h) {
+        grid.rect(x, y, w-unit(0.5, "mm"), h*0.33,  gp = gpar(fill = brewer.pal(9,'Set1')[3], col = NA))
+    }
+)
+
+col = c("AMP" =brewer.pal(9,'Set1')[1], "DEL"=brewer.pal(9,'Set1')[2], "PRM"=brewer.pal(9,'Set1')[4], "ENM"=brewer.pal(9,'Set1')[5], "MIM"="black", "TRM"=brewer.pal(9,'Set1')[3])
+lab = c("Amplification", "Deletion", "Promoter mutation", "Enhancer mutation", "Missense mutation", "Truncating mutation")
+
+oncoPrint(mat, get_type = function(x) strsplit(x, ";")[[1]],
+    alter_fun = alter_fun, col = col, 
+    column_title = "",
+    heatmap_legend_param = list(title = "Alternations", at = c("AMP", "DEL", "PRM", "ENM", "MIM", "TRM"), 
+        labels = lab), remove_empty_columns = FALSE, show_column_names = TRUE, column_names_gp = gpar(fontsize = 8),row_names_gp = gpar(fontsize = 8))
+
+```
+
+
+##trackViewer test
+```{r}
+library(Gviz)
+library(rtracklayer)
+library(trackViewer)
+
+gr <- GRanges("chr11", IRanges(32387775, 32458769), strand="-")
+wt1 <- importBam("/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/05.WT1_intron_verifacation/WJK_D0_wgs_WT1.bam",  ranges=gr)
+dat <- coverageGR(wt1$dat) 
+wt1$dat <-  dat[strand(dat)=="+"]
+wt1$dat2 <- dat[strand(dat)=="-"]
+viewTracks(trackList(wt1), gr=gr, autoOptimizeStyle=TRUE, newpage=FALSE)
+```
+```{r}
+library(TxDb.Hsapiens.UCSC.hg38.knownGene)
+library(org.Hs.eg.db)
+trs <- geneModelFromTxdb(TxDb.Hsapiens.UCSC.hg38.knownGene, org.Hs.eg.db, gr=gr)
+viewerStyle <- trackViewerStyle()
+setTrackViewerStyleParam(viewerStyle, "margin", c(.1, .05, .02, .02))
+vp <- viewTracks(trackList(wt1, trs), gr=gr, viewerStyle=viewerStyle, autoOptimizeStyle=TRUE)
+addGuideLine(c(32421394, 32421398), vp=vp)
+addArrowMark(list(x=32421396, y=2), label="WT1:+14137to+14141", col="blue", vp=vp)
+
+setTrackStyleParam(wt1, "color", c("black", "red"))
+viewTracks(trackList(trs, wt1), gr=gr, viewerStyle=viewerStyle)
+
+viewerStyleF <- viewerStyle
+setTrackViewerStyleParam(viewerStyleF, "flip", TRUE)
+setTrackViewerStyleParam(viewerStyleF, "xaxis", TRUE)
+setTrackViewerStyleParam(viewerStyleF, "margin", c(.1, .05, .01, .01))
+vp <- viewTracks(trackList(wt1, trs), gr=gr, viewerStyle=viewerStyleF)
+
+browseTracks(trackList(wt1, trs), gr=gr)
+
+```
+
+##trackviewer genome landscape
+```{r}
+ideo <- loadIdeogram("hg38")
+dataList <- ideo
+dataList$score <- as.numeric(dataList$gieStain)
+dataList <- dataList[dataList$gieStain!="gneg"]
+dataList <- GRangesList(dataList)
+ideogramPlot(ideo, dataList,layout=list(c("chr1", "chr13"),  c("chr2", "chr14"),c("chr3", "chr15"),c("chr4", "chr16"),c("chr5", "chr17"),c("chr6", "chr18"),c("chr7", "chr19"),c("chr8", "chr20"),c("chr9", "chr21"),c("chr10", "chr22"),c("chr11", "chrX"),c("chr12", "chrY")))
+
+ideogramPlot(ideo, dataList)
+
+mylist <- read.table(file = "/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/plot/ALL_APL_wgs_mutation.intersect.recurrent.targetgene", header = TRUE)
+mylist_gr <- GRanges(
+    seqnames = Rle(mylist$Chr),
+    ranges =  IRanges(start=mylist$Start, end=mylist$End),
+    strand =Rle(rep("*",nrow(mylist))), 
+    symbol = mylist$Gene_Symbol,
+    distance = mylist$TSS_Distance,
+    type = mylist$Regulon_Type)
+
+mylist_gr$score <- as.numeric(mylist_gr$type)
+mylist_gr <- GRangesList(mylist_gr)
+
+grid.newpage()
+ideogramPlot(ideo, mylist_gr, 
+             layout=list("chr1", "chr2", c("chr3", "chr22"), 
+                         c("chr4", "chr21"), c("chr5", "chr20"), 
+                         c("chr6", "chr19"), c("chr7", "chr18"),
+                         c("chr8", "chr17"), c("chr9", "chr16"),
+                         c("chr10", "chr15"), c("chr11", "chr14"),
+                         c("chr12", "chr13"), c("chrX", "chrY")),
+             parameterList = list(types="heatmap", colorKeyTitle="WL1109"))
+
+
+```
+
+
+##Gviz test
+```{r}
+library(GenomicRanges)
+data(cpgIslands)
+class(cpgIslands)
+chr <- as.character(unique(seqnames(cpgIslands)))
+gen <- genome(cpgIslands)
+atrack <- AnnotationTrack(cpgIslands, name = "CpG")
+gtrack <- GenomeAxisTrack()
+itrack <- IdeogramTrack(genome=gen, chromosome = chr)
+itrack <- IdeogramTrack(genome="hg38", chromosome = "chr11")
+data(geneModels)
+grtrack <- GeneRegionTrack(geneModels, genome="hg38", chromosome = chr, name = "Gene Model")
+plotTracks(list(itrack, gtrack, atrack, grtrack))
+plotTracks(list(itrack, gtrack, atrack, grtrack), from = 26700000, to = 26750000)
+plotTracks(list(itrack, gtrack, atrack, grtrack), extend.left = 1e+06, extend.right = 1e+06)
+```
+
+##Gviz WT1
+```{r}
+afrom <-  32387775
+ato <- 32458769
+
+############set biomart
+library(biomaRt)
+library(Gviz)
+bm <- useMart(biomart = "ENSEMBL_MART_ENSEMBL", dataset = "hsapiens_gene_ensembl")
+fm <- Gviz:::.getBMFeatureMap()
+fm[["symbol"]] <- "external_gene_name"
+
+biomTrack <- BiomartGeneRegionTrack(genome = "hg38", chromosome = "11", start = afrom, end = ato, name = "ENSEMBL", featureMap = fm, biomart = bm)
+
+gtrack <- GenomeAxisTrack()
+plotTracks(c(gtrack,biomTrack),transcriptAnnotation = "symbol",from = 32400024, to = 32396390)
+
+
+##############scheme set
+scheme <- getScheme()
+scheme$GeneRegionTrack$fill <- "salmon"
+scheme$GeneRegionTrack$col <- NULL
+scheme$GeneRegionTrack$transcriptAnnotation <- "transcript"
+addScheme(scheme, "myScheme")
+options(Gviz.scheme = "myScheme")
+options(ucscChromosomeNames=FALSE)
+###################### biomTrack 
+
+#####WT1
+itrack <- IdeogramTrack(genome="hg38", chromosome="chr11")
+plotTracks(c(itrack,gtrack,biomTrack), from = afrom, to = ato,chromosome = "chr11", transcriptAnnotation = "symbol")
+```
+
+
+##Gviz plot chr
+```{r}
+######USO1
+afrom <-  75724521
+ato <- 75814289
+gtrack <- GenomeAxisTrack()
+itrack <- IdeogramTrack(genome="hg38", chromosome="chr4")
+plotTracks(c(itrack,gtrack,biomTrack), from = afrom, to = ato,chromosome = "chr4", transcriptAnnotation = "symbol")
+
+plotTracks(itrack,from = afrom, to = ato)
+```
+
+```{r}
+######KMT2A
+afrom <-  118436489
+ato <- 118526824
+biomTrack <- BiomartGeneRegionTrack(genome = "hg38", chromosome = "11", start = afrom, end = ato, name = "ENSEMBL", featureMap = fm, biomart = bm)
+gtrack <- GenomeAxisTrack()
+itrack <- IdeogramTrack(genome="hg38", chromosome="chr11")
+plotTracks(c(itrack,gtrack,biomTrack), from = afrom, to = ato,chromosome = "chr11", transcriptAnnotation = "symbol")
+plotTracks(itrack,from = afrom, to = ato)
+```
+
+```{r}
+######PML
+afrom <-  73994672
+ato <- 74047814
+gtrack <- GenomeAxisTrack()
+itrack <- IdeogramTrack(genome="hg38", chromosome="chr15")
+plotTracks(c(itrack,gtrack,biomTrack), from = afrom, to = ato,chromosome = "chr15", transcriptAnnotation = "symbol")
+
+plotTracks(itrack,from = afrom, to = ato)
+```
+
+```{r}
+######RARA
+afrom <-  40309170
+ato <- 40357643
+gtrack <- GenomeAxisTrack()
+itrack <- IdeogramTrack(genome="hg38", chromosome="chr17")
+plotTracks(c(itrack,gtrack,biomTrack), from = afrom, to = ato,chromosome = "chr17", transcriptAnnotation = "symbol")
+
+plotTracks(itrack,from = afrom, to = ato)
+```
+
+
+```{r}
+######################sTrack
+library(BSgenome.Hsapiens.UCSC.hg38)
+library(Gviz)
+sTrack <- SequenceTrack(Hsapiens)
+sTrack
+
+#32396371
+#32400024
+
+plotTracks(sTrack, chromosome = 11,  from = 32396371, to = 32387775,add53 = TRUE,cex.main =0.01)
+
+#######################alTrack
+alTrack <- AlignmentsTrack("/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/05.WT1_intron_verifacation/wt1/YY_D0_wgs_WT1.bam",chromosome = "chr11",genome="hg38",isPaired = TRUE, name = "YY_D0")
+
+alTrack2 <-  AlignmentsTrack("/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/05.WT1_intron_verifacation/wt1/YY_MN_wgs_WT1.bam",chromosome = "chr11",genome="hg38",isPaired = TRUE, name = "YY_MN")
+
+################dispaly
+displayPars(biomTrack) <- list(background.panel = "#FFFEDB",col = NULL)
+plotTracks(c(itrack,gtrack,biomTrack,alTrack, alTrack2), from = afrom, to = ato,chromosome = "chr11",transcriptAnnotation = "symbol",background.title = "darkblue")
+
+plotTracks(c(gtrack,alTrack, alTrack2, sTrack), from = 32421375, to = 32421425,chromosome = "chr11",transcriptAnnotation = "symbol",background.title = "darkblue",cex=0.8,min.height = 2,coverageHeight = 0.2, minCoverageHeight= 0.2)
+```
+
+##trackviewer lollipop WT1
+```{r}
+################
+WT1 <- geneTrack(get("WT1", org.Hs.egSYMBOL2EG), TxDb.Hsapiens.UCSC.hg38.knownGene)[[1]]
+SNPs <- GRanges("chr11", IRanges(c(32396362,32396364,32400001,32421395,32421397,32421397,32421397), width = 1, names=c("11:32396362_p.A365fs(NYX)","11:32396364_p.S364X(CHH)","11:32400001_p.L332fs(PAJ)","11:32421395_C/A(WJK)","11:32421397_G/A(WJK)","11:32421397_G/A(PAJ)","11:32421397_G/T(YY)")), strand="-")
+SNPs$score <- c(1,1,1,1,1,1,1)
+SNPs$color <- c("#FF8833","#FF8833","#FF8833","#FF8833",brewer.pal(8,"Set2")[1],"#FF8833","#FF8833")
+SNPs$type <- "pin"
+SNPs$border <- "gray80"
+SNPs$feature.height = .1
+SNPs$cex <- 0.8
+WT1$dat2 <- SNPs
+```
+```{r}
+###############
+gr <- GRanges("chr11", IRanges(32387775,32438000))
+Coverage <- importBam("/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/05.WT1_intron_verifacation/WJK_D0_wgs_WT1.bam",  ranges=gr)
+dat <- coverageGR(Coverage$dat)
+Coverage$dat <- dat[strand(dat)=="+"]
+Coverage$dat2 <- dat[strand(dat)=="-"]
+
+###############
+WJK_H3K27ac <- importBam("/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/06.ChIPseq/WJK.H3K27ac_wt1.bam",  ranges=gr)
+LZY_H3K27ac <- importBam("/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/06.ChIPseq/LZY.H3K27ac_wt1.bam",  ranges=gr)
+CHH_H3K27ac <- importBam("/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/06.ChIPseq/CHH.H3K27ac_wt1.bam",  ranges=gr)
+XHF_H3K27ac <- importBam("/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/06.ChIPseq/XHF.H3K27ac_wt1.bam",  ranges=gr)
+
+```
+```{r}
+##############################
+optSty <- optimizeStyle(trackList(Coverage,WJK_H3K27ac,LZY_H3K27ac,XHF_H3K27ac,CHH_H3K27ac,WT1), theme="col")
+trackList <- optSty$tracks
+viewerStyle <- optSty$style
+
+
+setTrackStyleParam(trackList[[1]], "color", c("#51C6E6", "#DFA32D","black"))
+for( i in 2:5 ){
+  setTrackStyleParam(trackList[[i]], "color", brewer.pal(9,"Blues")[i+3])
+  setTrackStyleParam(trackList[[i]], "ylim", c(0,80))
+}
+setTrackStyleParam(trackList[[6]], "color", c("black", "black", "black"))
+
+
+for(i in 1:length(trackList)){
+  setTrackStyleParam(trackList[[i]], "height", 0.8/length(trackList))
+  setTrackStyleParam(trackList[[i]], "ylabgp", list(cex=.6))
+}
+
+
+setTrackViewerStyleParam(viewerStyle, "margin", c(.05, .05, .05, .05))
+
+vp <- viewTracks(trackList, gr=gr, viewerStyle=viewerStyle)
+
+
+```
+
+##TSTV plot
+```{r}
+library("ggplot2")
+library("plyr")
+tstv_count <- read.table("~/Bin/tstv/SRY_tstv.txt", header=TRUE)
+
+tstv<-ggplot(data=tstv_count,mapping = aes(x=reorder(Type,as.numeric(Trans)),y=Percent,fill=Symple)) + geom_bar(stat = 'identity', width=0.8, position = 'dodge') + geom_text(mapping = aes(label = Percent), size= 5, colour= "black", vjust=-1,position = position_dodge(0.5)) + xlab("")+ ylab("Mutation Type(%)") + ggtitle("SRY Diagnosis vs Relapse") + theme(axis.text.x = element_text(angle = 45, hjust = 0.5, vjust = 0.5), plot.title = element_text(hjust = 0.5)) + theme(axis.text.y=element_text(colour="black",size=15)) + theme(axis.text.x=element_text(colour="black",size=15)) + ylim(0,60)  + theme(panel.background=element_blank(),panel.grid.minor=element_blank(), axis.line=element_line(size=0.5),legend.title=element_blank()) + facet_grid(~Trans, scales = 'free', space = 'free_x', switch = "y")
+tstv + theme(legend.position = c(0.8,0.8),legend.key.size=unit(0.8,'cm'), legend.key.width=unit(1.6,'cm')) + scale_fill_manual(values=c(brewer.pal(9,"Blues")[5],brewer.pal(9,"Blues")[8])) 
+
+```
+
+##Gviz TTLL3
+```{r}
+library(Gviz)
+library(biomaRt)
+afrom <-  9792547	
+ato <- 9836356
+
+############set biomart
+bm <- useMart(host = "jan2019.archive.ensembl.org", biomart = "ENSEMBL_MART_ENSEMBL", dataset = "hsapiens_gene_ensembl")
+fm <- Gviz:::.getBMFeatureMap()
+fm[["symbol"]] <- "external_gene_name"
+
+
+##############scheme set
+scheme <- getScheme()
+scheme$GeneRegionTrack$fill <- "salmon"
+scheme$GeneRegionTrack$col <- NULL
+scheme$GeneRegionTrack$transcriptAnnotation <- "transcript"
+addScheme(scheme, "myScheme")
+options(Gviz.scheme = "myScheme")
+options(ucscChromosomeNames=FALSE)
+###################### biomTrack 
+biomTrack <- BiomartGeneRegionTrack(genome = "hg38", chromosome = "chr3", start = afrom, end = ato, name = "ENSEMBL", featureMap = fm, biomart = bm)
+gtrack <- GenomeAxisTrack()
+itrack <- IdeogramTrack(genome="hg38", chromosome = "chr3")
+
+plotTracks(c(itrack,gtrack, biomTrack), from = afrom, to = ato,chromosome = "chr3", transcriptAnnotation = "symbol")
+```
+```{r}
+######################sTrack
+library(BSgenome.Hsapiens.UCSC.hg38)
+sTrack <- SequenceTrack(Hsapiens)
+#######################alTrack
+alTrack <- AlignmentsTrack("/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/05.WT1_intron_verifacation/ttll3/XHF_D0_wgs_TTLL3.bam",chromosome = "chr3",genome="hg38",isPaired = TRUE, name = "XHF_D0")
+
+alTrack2 <-  AlignmentsTrack("/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/05.WT1_intron_verifacation/ttll3/XHF_MN_wgs_TTLL3.bam",chromosome = "chr3",genome="hg38",isPaired = TRUE, name = "XHF_MN")
+
+################dispaly
+displayPars(biomTrack) <- list(background.panel = "#FFFEDB",col = NULL)
+plotTracks(c(itrack,gtrack,biomTrack,alTrack, alTrack2), from = afrom, to = ato,chromosome = "chr3",transcriptAnnotation = "symbol",background.title = "darkblue")
+
+plotTracks(c(itrack,gtrack,alTrack, alTrack2, sTrack), from = 9809960, to = 9810020,chromosome = "chr3",transcriptAnnotation = "symbol",background.title = "darkblue",cex=0.8,min.height = 2,coverageHeight = 0.2, minCoverageHeight= 0.2)
+```
+
+##trackviewer lollipop TTLL3
+```{r}
+################
+library(trackViewer)
+library(TxDb.Hsapiens.UCSC.hg38.knownGene)
+library(org.Hs.eg.db)
+TTLL3 <- geneTrack(get("TTLL3", org.Hs.egSYMBOL2EG), TxDb.Hsapiens.UCSC.hg38.knownGene)[[1]]
+SNPs <- GRanges("chr3", IRanges(c(9809990,9809990,9809990,9809990,9809990), width = 1, names=c("3:9809990_A/G(XHF)","3:9809990_A/G(TFL)","3:9809990_A/G(PAJ)","3:9809990_A/G(WJK)","3:9809990_A/G(ZLT)")), strand="+")
+SNPs$score <- c(1,1,1,1,1)
+SNPs$color <- c("#FF8833","#FF8833","#FF8833","#FF8833",brewer.pal(8,"Set2")[3])
+SNPs$type <- "pin"
+SNPs$border <- "gray80"
+SNPs$feature.height = .1
+SNPs$cex <- 0.8
+TTLL3$dat2 <- SNPs
+
+TTLL3a <- geneTrack(get("ARPC4-TTLL3", org.Hs.egSYMBOL2EG), TxDb.Hsapiens.UCSC.hg38.knownGene)[[1]]
+
+```
+
+```{r}
+gr <- GRanges("chr3", IRanges(9780000,9860000))
+trs <- geneModelFromTxdb(TxDb.Hsapiens.UCSC.hg38.knownGene,
+                         org.Hs.eg.db,
+                         gr=gr)
+```
+
+```{r}
+###############
+Coverage <- importBam("/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/05.WT1_intron_verifacation/ttll3/XHF_D0_wgs_TTLL3.bam",  ranges=gr)
+dat <- coverageGR(Coverage$dat)
+Coverage$dat <- dat[strand(dat)=="+"]
+Coverage$dat2 <- dat[strand(dat)=="-"]
+
+###############
+WJK_H3K27ac <- importBam("/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/06.ChIPseq/ttll3/WJK.H3K27ac_ttll3.bam",  ranges=gr)
+LZY_H3K27ac <- importBam("/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/06.ChIPseq/ttll3/LZY.H3K27ac_ttll3.bam",  ranges=gr)
+CHH_H3K27ac <- importBam("/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/06.ChIPseq/ttll3/CHH.H3K27ac_ttll3.bam",  ranges=gr)
+XHF_H3K27ac <- importBam("/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/06.ChIPseq/ttll3/XHF.H3K27ac_ttll3.bam",  ranges=gr)
+
+```
+```{r}
+##############################
+optSty <- optimizeStyle(trackList(Coverage,WJK_H3K27ac,LZY_H3K27ac,XHF_H3K27ac,CHH_H3K27ac,TTLL3), theme="col")
+
+trackList <- optSty$tracks
+viewerStyle <- optSty$style
+
+
+setTrackStyleParam(trackList[[1]], "color", c("#51C6E6", "#DFA32D","black"))
+for( i in 2:5 ){
+  setTrackStyleParam(trackList[[i]], "color", brewer.pal(9,"Blues")[i+3])
+  setTrackStyleParam(trackList[[i]], "ylim", c(0,55))
+}
+setTrackStyleParam(trackList[[6]], "color", c("black", "black", "black"))
+
+setTrackStyleParam(trackList[[1]], "height", 0.15)
+for(i in 2:length(trackList)){
+  setTrackStyleParam(trackList[[i]], "height", 0.8/length(trackList))
+  setTrackStyleParam(trackList[[i]], "ylabgp", list(cex=.6))
+}
+
+setTrackViewerStyleParam(viewerStyle, "margin", c(.05, .05, .05, .05))
+
+vp <- viewTracks(trackList, gr=gr, viewerStyle=viewerStyle)
+
+```
+
+
+##Gviz PBRM1
+```{r}
+library(Gviz)
+library(biomaRt)
+afrom <-  52545351
+ato <- 52685850
+
+############set biomart
+bm <- useMart(host = "jan2019.archive.ensembl.org", biomart = "ENSEMBL_MART_ENSEMBL", dataset = "hsapiens_gene_ensembl")
+fm <- Gviz:::.getBMFeatureMap()
+fm[["symbol"]] <- "external_gene_name"
+
+
+##############scheme set
+scheme <- getScheme()
+scheme$GeneRegionTrack$fill <- "salmon"
+scheme$GeneRegionTrack$col <- NULL
+scheme$GeneRegionTrack$transcriptAnnotation <- "transcript"
+addScheme(scheme, "myScheme")
+options(Gviz.scheme = "myScheme")
+options(ucscChromosomeNames=FALSE)
+###################### biomTrack 
+biomTrack <- BiomartGeneRegionTrack(genome = "hg38", chromosome = "chr3", start = afrom, end = ato, name = "ENSEMBL", featureMap = fm, biomart = bm)
+gtrack <- GenomeAxisTrack()
+itrack <- IdeogramTrack(genome="hg38", chromosome = "chr3")
+
+plotTracks(c(itrack,gtrack, biomTrack), from = afrom, to = ato,chromosome = "chr3", transcriptAnnotation = "symbol")
+```
+```{r}
+######################sTrack
+library(BSgenome.Hsapiens.UCSC.hg38)
+sTrack <- SequenceTrack(Hsapiens)
+#######################alTrack
+alTrack <- AlignmentsTrack("/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/05.WT1_intron_verifacation/pbrm1/LY_D0_wgs_PBRM1.bam",chromosome = "chr3",genome="hg38",isPaired = TRUE, name = "LY_D0")
+
+alTrack2 <-  AlignmentsTrack("/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/05.WT1_intron_verifacation/pbrm1/LY_MN_wgs_PBRM1.bam",chromosome = "chr3",genome="hg38",isPaired = TRUE, name = "LY_MN")
+
+################dispaly
+displayPars(biomTrack) <- list(background.panel = "#FFFEDB",col = NULL)
+plotTracks(c(itrack,gtrack,biomTrack,alTrack, alTrack2), from = afrom, to = ato,chromosome = "chr3",transcriptAnnotation = "symbol",background.title = "darkblue")
+
+plotTracks(c(itrack,gtrack,alTrack, alTrack2, sTrack), from = 52683825, to = 52683875,chromosome = "chr3",transcriptAnnotation = "symbol",background.title = "darkblue",cex=0.8,min.height = 2,coverageHeight = 0.2, minCoverageHeight= 0.2)
+```
+
+
+##trackviewer lollipop PBRM1
+```{r}
+################
+library(trackViewer)
+library(TxDb.Hsapiens.UCSC.hg38.knownGene)
+library(org.Hs.eg.db)
+PBRM1 <- geneTrack(get("PBRM1", org.Hs.egSYMBOL2EG), TxDb.Hsapiens.UCSC.hg38.knownGene)[[1]]
+SNPs <- GRanges("chr3", IRanges(c(52683850,52683850,52683850), width = 1, names=c("3:52683850_T/C(PAJ)","3:52683850_T/C(SRY)","3:52683850_T/C(LY)")), strand="+")
+SNPs$score <- c(1,1,1)
+SNPs$color <- "#FF8833"
+SNPs$type <- "pin"
+SNPs$border <- "gray80"
+SNPs$feature.height = .1
+SNPs$cex <- 0.8
+PBRM1$dat2 <- SNPs
+
+```
+
+```{r}
+gr <- GRanges("chr3", IRanges(52545351,52685850))
+trs <- geneModelFromTxdb(TxDb.Hsapiens.UCSC.hg38.knownGene,
+                         org.Hs.eg.db,
+                         gr=gr)
+```
+
+```{r}
+###############
+Coverage <- importBam("/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/05.WT1_intron_verifacation/pbrm1/PAJ_D0_wgs_pbrm1.bam",  ranges=gr)
+dat <- coverageGR(Coverage$dat)
+Coverage$dat <- dat[strand(dat)=="+"]
+Coverage$dat2 <- dat[strand(dat)=="-"]
+
+###############
+WJK_H3K27ac <- importBam("/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/06.ChIPseq/pbrm1/WJK.H3K27ac_pbrm1.bam",  ranges=gr)
+LZY_H3K27ac <- importBam("/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/06.ChIPseq/pbrm1/LZY.H3K27ac_pbrm1.bam",  ranges=gr)
+CHH_H3K27ac <- importBam("/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/06.ChIPseq/pbrm1/CHH.H3K27ac_pbrm1.bam",  ranges=gr)
+XHF_H3K27ac <- importBam("/Users/liuyabin/Desktop/Wang_Lab/project/21.WGS_noncoding/06.ChIPseq/pbrm1/XHF.H3K27ac_pbrm1.bam",  ranges=gr)
+
+```
+```{r}
+##############################
+optSty <- optimizeStyle(trackList(Coverage,WJK_H3K27ac,LZY_H3K27ac,XHF_H3K27ac,CHH_H3K27ac,PBRM1), theme="col")
+
+trackList <- optSty$tracks
+viewerStyle <- optSty$style
+
+
+setTrackStyleParam(trackList[[1]], "color", c("#51C6E6", "#DFA32D","black"))
+for( i in 2:5 ){
+  setTrackStyleParam(trackList[[i]], "color", brewer.pal(9,"Blues")[i+3])
+  setTrackStyleParam(trackList[[i]], "ylim", c(0,60))
+}
+setTrackStyleParam(trackList[[6]], "color", c("black", "black", "black"))
+
+setTrackStyleParam(trackList[[1]], "height", 0.15)
+for(i in 2:length(trackList)){
+  setTrackStyleParam(trackList[[i]], "height", 0.8/length(trackList))
+  setTrackStyleParam(trackList[[i]], "ylabgp", list(cex=.6))
+}
+
+setTrackViewerStyleParam(viewerStyle, "margin", c(.05, .05, .05, .05))
+
+vp <- viewTracks(trackList, gr=gr, viewerStyle=viewerStyle)
+
+```

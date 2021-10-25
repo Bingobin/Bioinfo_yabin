@@ -1,0 +1,518 @@
+---
+title: "Untitled"
+author: "Yabin Liu"
+date: "2020/3/1"
+output: html_document
+---
+
+```{r}
+library("ggplot2")
+library("RColorBrewer")
+library(tidyverse)
+library(cowplot)
+library(ChIPseeker)
+#library(MAGeCKFlute)
+library(UpSetR)
+library("survival")
+library("survminer")
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(maftools)
+
+blank <-  theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"), panel.background = element_blank())
+```
+
+
+##Bar plot basd on FAB & Center
+```{r}
+aml_wt1_status <- read.table("~/Desktop/WT1_report/AML_TCGA_TARGET_BEAT/AML_clinical_WT1/AML_clinical_all.txt", header = TRUE, sep = "\t") 
+aml_wt1_status$WT1 <- factor(aml_wt1_status$WT1,levels = c("WildType","Mutation"))
+aml_wt1_status$Center <- factor(aml_wt1_status$Center,levels = c("TARGET","BEAT","LK2016","TCGA","CD2017","NC2018"))
+```
+
+```{r}
+p1<-ggplot(aml_wt1_status, aes(x = FAB, fill=WT1)) + geom_bar(position='dodge',stat="count") + xlab("") + ylab("Number of samples") + ggtitle("Distrabution of WT1 mutations based on FAB classification") + scale_fill_manual(values=c("#80B1D3","#FB8072"))  +  geom_text(aes(label=..count..),stat="count",position=position_dodge(width=1), color="black",size=4) +theme(legend.position = "top") + blank
+```
+
+```{r}
+p2<-ggplot(aml_wt1_status, aes(x = Center, fill=FAB)) + geom_bar(stat="count") + xlab("") + ylab("Number of samples") + ggtitle("Distrabution of Samples in different cohort studies") + scale_fill_manual(values=brewer.pal(11,"Set3"))+ blank
+# + geom_text(aes(label=..count..),stat="count",position=position_stack(vjust = 0.5), color="black",size=4) 
+```
+
+```{r}
+ggplot(aml_wt1_status, aes(x = FAB, fill=WT1)) + geom_bar(position='fill',stat="count") + xlab("") + ylab("Number of samples") + ggtitle("Distrabution of WT1 mutations based on FAB classification") + scale_fill_manual(values=c("#FB8072","grey90"))  + geom_text(aes(label=..count..),stat="count",position=position_fill(), color="black",size=4) +blank
+```
+
+```{r}
+aml_FAB_wt1_stat <- aml_wt1_status %>% group_by(FAB,WT1) %>% summarize(num=n())
+aml_Center_wt1_stat <- aml_wt1_status %>% group_by(Center,WT1) %>% summarize(num=n())
+prop.table(table(aml_wt1_status$FAB,aml_wt1_status$WT1))
+
+tf1<-cbind(aml_FAB_wt1_stat[aml_FAB_wt1_stat$WT1=="Mutation",c(1,3)],aml_FAB_wt1_stat[aml_FAB_wt1_stat$WT1=="WildType",c(1,3)])[,c(1,2,4)]
+
+p3<-ggplot(tf1, aes(x = FAB,y=num/(num+num1))) + geom_bar(stat = "identity",fill=brewer.pal(8,"Paired")[2],show.legend = TRUE)  + geom_text(aes(label = round(num/(num+num1),3)), size=4, position=position_stack(vjust = 0.5), color="white") + ggtitle("Percentage of WT1 mutations based on FAB classification") + ylab("Percentage") + xlab("") + blank
+
+tf2<-cbind(aml_Center_wt1_stat[aml_Center_wt1_stat$WT1=="Mutation",c(1,3)],aml_Center_wt1_stat[aml_Center_wt1_stat$WT1=="WildType",c(1,3)])[,c(1,2,4)]
+
+p4<-ggplot(tf2, aes(x = Center,y=num/(num+num1))) + geom_bar(stat = "identity",aes(fill=Center))  + geom_text(aes(label = round(num/(num+num1),3)), size=4, color="black") + ggtitle("Percentage of WT1 mutations in different Database") + ylab("Percentage") + xlab("")+ scale_fill_manual(values=brewer.pal(8,"Set2"))+ blank + geom_text(aes(label = paste(num,"/",(num+num1),seq="")), size=4, position=position_stack(vjust = 0.5), color="black")
+```
+
+```{r}
+plot_grid(p1,p2,p3,p4, nrow=2, align = "v", rel_widths = c(2,1.5,2,1.5), labels=c("A","B","C","D"))
+```
+
+##plot basd on Age at diagnosis
+
+```{r}
+aml_clinic <- read.table("~/Desktop/WT1_report/AML_TCGA_TARGET_BEAT/AML_clinical_WT1/AML_clinical_all.txt", header = TRUE, sep = "\t",quote = NULL,stringsAsFactors=FALSE) 
+
+aml_clinic<-aml_clinic[aml_clinic$ageAtDiagnosis != "Unknown",]
+aml_clinic$ageAtDiagnosis <- as.numeric(aml_clinic$ageAtDiagnosis)
+aml_clinic$overallSurvival <-as.numeric(aml_clinic$overallSurvival)
+```
+
+
+```{r}
+a1<-ggplot(aml_clinic, aes(x = Center, y=ageAtDiagnosis, color=Center)) + geom_violin()  + geom_jitter(aes(color = Center), alpha=0.4) + xlab("") + ylab("Age") + ggtitle("Cohort-based sample age distribution") + theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 0.5), plot.title = element_text(hjust = 0.5)) + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"), panel.background = element_blank())
+```
+```{r}
+aml_clinic$ageGroup <- "Adult"
+aml_clinic[aml_clinic$ageAtDiagnosis <=3,]$ageGroup <- "Infants"
+aml_clinic[aml_clinic$ageAtDiagnosis >3 & aml_clinic$ageAtDiagnosis<=14,]$ageGroup <- "Children"
+aml_clinic[aml_clinic$ageAtDiagnosis >14 & aml_clinic$ageAtDiagnosis<=39,]$ageGroup <- "AYA"
+
+a2<-ggplot(aml_clinic, aes(x = ageGroup, fill=Center)) + geom_bar(position='stack',stat="count",aes(fill=Center)) + xlab("") + ylab("Number of samples") + ggtitle("Distrabution of Samples by age") + geom_text(aes(label=..count..),stat="count",position=position_stack(vjust = 0.5), color="black",size=4) + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"), panel.background = element_blank()) + coord_polar(theta = "y")
+```
+
+```{r}
+aml_age_wt1_stat <- aml_clinic %>% group_by(ageGroup,WT1) %>% summarize(num=n())
+prop.table(table(aml_clinic$ageGroup,aml_clinic$WT1))
+
+tf<-cbind(aml_age_wt1_stat[aml_age_wt1_stat$WT1=="Mutation",c(1,3)],aml_age_wt1_stat[aml_age_wt1_stat$WT1=="WildType",c(1,3)])[,c(1,2,4)]
+
+tf$label<-paste(tf$num,"/",tf$num1+tf$num,sep="")
+
+a3<-ggplot(tf, aes(x = ageGroup,y=num/(num+num1))) + geom_bar(stat = "identity",fill="#377EB8",show.legend = TRUE)  + geom_text(aes(label = round(num/(num+num1),3)), size=4, position=position_stack(vjust = 0.5), color="white") + ggtitle("Percentage of WT1 mutations by age") + ylab("Percentage") + xlab("")  + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"), panel.background = element_blank())  + geom_text(aes(label=label), size=4, position=position_stack(vjust = 0.6), color="white")
+```
+```{r}
+plot_grid(a1,a2,a3, labels=c("A","B","C"), rows = 1)
+```
+
+##Overall survival clinical
+```{r}
+aml_clinic$Status <- 0
+aml_clinic[aml_clinic$vitalStatus == "Dead",]$Status <- 1
+
+pretty_aml <- aml_clinic %>%
+  transmute(time=overallSurvival,
+            status=Status,
+            Age = ageAtDiagnosis,
+            Sex = factor(aml_clinic$Sex),
+            WT1 = factor(aml_clinic$WT1),
+            FAB = factor(aml_clinic$FAB),
+            Group = factor(aml_clinic$ageGroup), 
+            Cohort = factor(aml_clinic$Center)
+            )
+
+model <- coxph( Surv(time, status) ~ WT1 + Sex + Group +FAB, data = pretty_aml)
+#model <- coxph( Surv(time, status) ~WT1, data = pretty_aml)
+ggforest(model)
+
+
+fit <- survfit(Surv(time/365, status) ~WT1, data= pretty_aml)
+ggsurvplot(fit,palette = c("#FB8072","#80B1D3"),risk.table = TRUE,ncensor.plot=TRUE,pval=TRUE,conf.int = TRUE,xlab="Time in years")
+
+
+
+fit <- survfit(Surv(time/365, status) ~Group+WT1, data= pretty_aml)
+ggsurvplot(fit,palette = brewer.pal(8,"Dark2"),risk.table = TRUE,ncensor.plot=FALSE,pval=TRUE,conf.int = FALSE,xlab="Time in years")
+
+ggsurvplot_facet(fit,pretty_aml,facet.by="Group", palette = c("#FB8072","#80B1D3"),risk.table = TRUE,ncensor.plot=TRUE,pval=TRUE,conf.int = FALSE,xlab="Time in years")
+```
+
+
+```{r}
+fit <- survfit(Surv(time/365, status) ~WT1, data= pretty_aml)
+ggsurv.list <- ggsurvplot_group_by(fit, pretty_aml, group.by = "Group",
+                                 risk.table = TRUE,
+                                 pval = TRUE, palette = c("#FB8072","#80B1D3"))
+#conf.int = FALSE, 
+names(ggsurv.list)
+```
+
+##WT1  HEK293  target gene
+```{r}
+peaks_wt1 <- readPeakFile("~/Desktop/WT1_report/AML_TCGA_TARGET_BEAT/target_gene_Cistrome/64978_peaks_WT1.bed")
+txdb <- TxDb.Hsapiens.UCSC.hg38.knownGene
+
+peakHeatmap(peaks_wt1, TxDb=txdb, upstream=1000, downstream=1000, color="red")
+covplot(peaks_wt1,weightCol = "V5")
+plotAvgProf2(peaks_wt1, TxDb=txdb, upstream=1000, downstream=1000,
+             xlab="Genomic Region (5'->3')", ylab = "Read Count Frequency")
+
+peaks_wt1.anno<-annotatePeak(peaks_wt1,  tssRegion = c(-3000, 3000), TxDb=txdb)
+plotAnnoPie(peaks_wt1.anno)
+plotAnnoBar(peaks_wt1.anno)
+plotDistToTSS(peaks_wt1.anno)
+#ChIPseeker::upsetplot(peaks_wt1.anno, vennpie=TRUE)
+ChIPseeker::upsetplot(peaks_wt1.anno)
+```
+```{r}
+peaks_wt1.anno.matrix<-as.data.frame(peaks_wt1.anno@anno)
+peaks_wt1.anno.matrix$Symbol <- TransGeneID(peaks_wt1.anno.matrix$geneId,"Entrez", "Symbol", organism = "hsa")
+write.table(peaks_wt1.anno.matrix,"q", sep = "\t", quote = FALSE)
+```
+
+##WT1 METH & Target Volcanno plot
+```{r}
+label <- c("KCNMA1","NDRG2","ARSK","ZNF536","SGMS2","FAM107B","GXYLT2","DLC1","ITPRIPL1","RAB31", "CPEB2","TSHZ3","CABLES1","PCMT1","S100A11", "SNX21")
+a<-read.table("/Users/liuyabin/Desktop/WT1_report/AML_TCGA_TARGET_BEAT/target_gene_Cistrome/WT1_WLE-MUT_DMP.deseq.result.txt",header = TRUE,stringsAsFactors=FALSE)
+p2<-VolcanoView(a, x = "log2FoldChange", y = "padj", x_cutoff = log2(1.5), y_cutoff = 0.05,Label = "Gene_Name",xlab = "Log2 FC", top=0,topnames=label,ylab="-Log10(Q value)")
+p2
+```
+
+##WT1 METH & Target Upset plot
+```{r}
+WT1_target_gene <- read.table("/Users/liuyabin/Desktop/WT1_report/AML_TCGA_TARGET_BEAT/target_gene_Cistrome/64978_WT1_target_gene.list",header=FALSE,stringsAsFactors=FALSE)
+TET2_target_gene <- read.table("/Users/liuyabin/Desktop/WT1_report/AML_TCGA_TARGET_BEAT/target_gene_Cistrome/67858_TET2_target_gene.list",header=FALSE,stringsAsFactors=FALSE)
+ChAMP_high <- read.table("/Users/liuyabin/Desktop/WT1_report/AML_TCGA_TARGET_BEAT/target_gene_Cistrome/AML_WT1_WLE_vs_MUT.ChAMP.high.list",header=FALSE,stringsAsFactors=FALSE)
+ChAMP_low <- read.table("/Users/liuyabin/Desktop/WT1_report/AML_TCGA_TARGET_BEAT/target_gene_Cistrome/AML_WT1_WLE_vs_MUT.ChAMP.low.list",header=FALSE,stringsAsFactors=FALSE)
+DESeq2_up <- read.table("/Users/liuyabin/Desktop/WT1_report/AML_TCGA_TARGET_BEAT/target_gene_Cistrome/AML_WT1_WLE_vs_MUT.DESeq2.up.list",header=FALSE,stringsAsFactors=FALSE)
+DESeq2_down <- read.table("/Users/liuyabin/Desktop/WT1_report/AML_TCGA_TARGET_BEAT/target_gene_Cistrome/AML_WT1_WLE_vs_MUT.DESeq2.down.list",header=FALSE,stringsAsFactors=FALSE)
+
+colnames(WT1_target_gene) <- "Gene"
+WT1_target_gene$WT1_target <- 1
+colnames(TET2_target_gene) <- "Gene"
+TET2_target_gene$TET2_target <- 1
+colnames(ChAMP_high) <- "Gene"
+ChAMP_high$ChAMP_high <- 1
+colnames(ChAMP_low) <- "Gene"
+ChAMP_low$ChAMP_low <- 1
+colnames(DESeq2_up) <- "Gene"
+DESeq2_up$DESeq2_up <- 1
+colnames(DESeq2_down) <- "Gene"
+DESeq2_down$DESeq2_down <- 1
+
+```
+
+```{r}
+tf<-merge(WT1_target_gene,TET2_target_gene,by="Gene",all=T)
+tf<-merge(tf,ChAMP_high,by="Gene",all=T)
+tf<-merge(tf,ChAMP_low,by="Gene",all=T)
+tf<-merge(tf,DESeq2_up,by="Gene",all=T)
+tf<-merge(tf,DESeq2_down,by="Gene",all=T)
+tf[is.na(tf)] <- 0
+
+p1<-upset(tf,  nset=6, 
+      queries = list(
+                list(query = intersects, params = list("ChAMP_low","WT1_target","DESeq2_up"), active=T,color=brewer.pal(4,"Set1")[1]),
+                list(query = intersects, params = list("ChAMP_low","WT1_target","DESeq2_down"), active=T,color=brewer.pal(4,"Set1")[1]),
+                list(query = intersects, params = list("ChAMP_low","WT1_target","DESeq2_up","TET2_target"), active=T,color=brewer.pal(4,"Set1")[1])
+                ),
+      matrix.color = brewer.pal(9,"Blues")[6], 
+      main.bar.color =brewer.pal(9,"Blues")[6],
+      sets.bar.color = brewer.pal(6,"Set2"),
+      order.by = "freq")
+p1
+```
+
+
+##Gene Enrichment Analysis
+```{r}
+tf$Entrez <- TransGeneID(tf$Gene, "Symbol", "Entrez", organism = "hsa")
+
+wp2gene <- read.gmt("~/Bin/gmt/wikipathways-20190510-gmt-Homo_sapiens.gmt")
+wp2gene <- wp2gene %>% tidyr::separate(ont, c("name","version","wpid","org"), "%")
+wpid2gene <- wp2gene %>% dplyr::select(wpid, gene)
+wpid2name <- wp2gene %>% dplyr::select(wpid, name)
+```
+
+###Function enrich_combind
+```{r}
+enrich_combind <- function(gene,pvc,qvc){
+  ego_bp <- enrichGO(gene = gene, OrgDb = org.Hs.eg.db, keyType = 'ENTREZID', ont = "BP", pAdjustMethod = "BH", pvalueCutoff  = pvc, qvalueCutoff  = qvc, readable = TRUE)
+  ego_cc <- enrichGO(gene = gene, OrgDb = org.Hs.eg.db, keyType = 'ENTREZID', ont = "CC", pAdjustMethod = "BH", pvalueCutoff  = pvc, qvalueCutoff  = qvc, readable = TRUE)
+  ego_mf <- enrichGO(gene = gene, OrgDb = org.Hs.eg.db, keyType = 'ENTREZID', ont = "MF", pAdjustMethod = "BH", pvalueCutoff  = pvc, qvalueCutoff  = qvc, readable = TRUE)
+  ewp <- enricher(gene, TERM2GENE = wpid2gene, TERM2NAME = wpid2name, pvalueCutoff = 0.5,qvalueCutoff  = qvc)
+  ewp <- setReadable(ewp, org.Hs.eg.db, keyType = "ENTREZID")
+  ekg<- enrichKEGG(gene, organism = "hsa",pvalueCutoff = 0.5,qvalueCutoff  = qvc)
+  ekg <- setReadable(ekg, org.Hs.eg.db, keyType = "ENTREZID")
+  tmp <- list()
+  tmp[["ego_bp"]] <- ego_bp@result
+  tmp[["ego_cc"]] <- ego_cc@result
+  tmp[["ego_mf"]] <- ego_mf@result
+  tmp[["ewp"]] <- ewp@result
+  tmp[["ekg"]] <- ekg@result
+  return(tmp)
+}
+```
+
+###Function enricher_plot
+```{r}
+enricher_plot <- function(enricher,bp,cc,mf,wp,kg,value){
+  df <- data.frame(Description=enricher$ego_bp[bp,2],Pvalue=enricher$ego_bp[bp,value],Type=rep("GO_BP",length(bp)))
+  df.tmp <- data.frame(Description=enricher$ego_cc[cc,2],Pvalue=enricher$ego_cc[cc,value],Type=rep("GO_CC",length(cc)))
+  df <- rbind(df,df.tmp)
+  df.tmp <- data.frame(Description=enricher$ego_mf[mf,2],Pvalue=enricher$ego_mf[mf,value],Type=rep("GO_MF",length(mf)))
+  df <- rbind(df,df.tmp)
+#  df.tmp <- data.frame(Description=enricher$ewp[wp,2],Pvalue=enricher$ewp[wp,value],Type=rep("WikiPath",length(wp)))
+#  df <- rbind(df,df.tmp)
+  df.tmp <- data.frame(Description=enricher$ekg[kg,2],Pvalue=enricher$ekg[kg,value],Type=rep("KEGG",length(kg)))
+  df <- rbind(df,df.tmp)
+
+#ggplot(df,aes(x=Description,y=-log(Pvalue),fill=Type)) + geom_bar(stat = "identity",show.legend = TRUE) + coord_flip()
+
+  p<-ggplot(df,aes(-log(Pvalue),fct_reorder(Description, -log(Pvalue)))) +geom_segment(aes(xend=0, yend = Description,color=Type),linetype = 2,show.legend = FALSE) + geom_point(aes(color=Type),size=5,show.legend = FALSE) + scale_color_manual(values = brewer.pal(5,"Set2")) + facet_grid(Type~.,scales = 'free',space = 'free_y', switch = "x") + blank + ylab("")
+  return(p)
+}
+```
+
+###Display
+```{r}
+gene <- tf[tf$DESeq2_up == 1 & ! is.na(tf$Entrez),]$Entrez
+DESeq2_up.enrich <- enrich_combind(gene,0.5,0.5)
+gene <- tf[tf$DESeq2_down == 1 & ! is.na(tf$Entrez),]$Entrez
+DESeq2_down.enrich <- enrich_combind(gene,0.5,0.5)
+gene <- tf[tf$ChAMP_low == 1 & ! is.na(tf$Entrez),]$Entrez
+ChAMP_low.enrich <- enrich_combind(gene,0.5,0.5)
+```
+```{r}
+gene <- tf[tf$WT1_target == 1 & ! is.na(tf$Entrez),]$Entrez
+WT1_target.enrich <- enrich_combind(gene,0.5,0.5)
+gene <- tf[tf$TET2_target == 1 & ! is.na(tf$Entrez),]$Entrez
+TET2_target.enrich <- enrich_combind(gene,0.5,0.5)
+```
+
+```{r}
+#enricher_plot(WT1_target.enrich,1:5,1:5,1:5,1:5,1:5,5) + ggtitle("")
+#enricher_plot(TET2_target.enrich,3:7,1:5,1:5,1:5,1:5,5) + ggtitle("")
+```
+
+```{r}
+a1<-enricher_plot(ChAMP_low.enrich,1:3,1:3,1:3,1:3,c(3,4,5,6,9),5) + ggtitle("WT1 WLE vs MUT DMP-associated genes")
+a2<-enricher_plot(DESeq2_up.enrich,c(1,3,5),c(1,3,4),1:3,c(1,7,9),c(7,8,10,11,13),5) + ggtitle("WT1 WLE vs MUT up-regulated DEG")
+a3<-enricher_plot(DESeq2_down.enrich,c(4,14,19),c(1,5,6),c(1,3,4),c(4,15,16),c(2,3,8,9,12),5) + ggtitle("WT1 WLE vs MUT down-regulated DEG")
+
+plot_grid(a1,a2,a3, labels=c("A","B","C"), ncol  = 1)
+```
+
+##WT1 MUT WHE WLE grouping clinical
+```{r}
+laml_group <- read.table("/Users/liuyabin/Desktop/WT1_report/WT1_MUT-WLE.grouping.clinical.txt",header=TRUE,row.names = 1,stringsAsFactors=FALSE)
+
+blank <-   theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"), panel.background = element_blank()) 
+ ggplot(data=laml_group, aes(x=Group,y=log2(FPKM)))+geom_boxplot(aes(color=Group),outlier.shape = NA,show.legend = FALSE) + geom_jitter(aes(color=Group),alpha=1,size=1,show.legend = FALSE) + ylab("Log2(FPKM)") + ggtitle("") + xlab("")  + scale_color_manual(values=brewer.pal(n=3, name="Set2")) + blank 
+```
+
+
+```{r}
+laml_group$Status <- 0
+laml_group[laml_group$vitalStatus == "Dead",]$Status <- 1
+laml_group[laml_group$overallSurvival == "Unknown",]$overallSurvival <- 0
+laml_group$overallSurvival <- as.numeric(laml_group$overallSurvival)
+
+pretty_laml_group <- laml_group %>%
+  transmute(time=overallSurvival,
+            status=Status,
+            Age = ageAtDiagnosis,
+            Exp = FPKM,
+            Sex = factor(laml_group$Sex),
+            FAB = factor(laml_group$FAB),
+            WT1 = factor(laml_group$WT1),
+            Group = factor(laml_group$Group)
+            )
+
+model <- coxph( Surv(time, status) ~  Age + Exp + Group + Sex, data = pretty_laml_group)
+#model <- coxph( Surv(time, status) ~WT1, data = pretty_aml)
+ggforest(model)
+
+
+fit <- survfit(Surv(time/365, status) ~Group, data= pretty_laml_group)
+ggsurvplot(fit,palette = c("black","#FB8072","#80B1D3"),risk.table = TRUE,ncensor.plot=FALSE,pval=TRUE,conf.int = FALSE,xlab="Time in years")
+
+
+
+fit <- survfit(Surv(time/365, status) ~Group+WT1, data= pretty_aml)
+ggsurvplot(fit,palette = brewer.pal(8,"Dark2"),risk.table = TRUE,ncensor.plot=FALSE,pval=TRUE,conf.int = FALSE,xlab="Time in years")
+
+ggsurvplot_facet(fit,pretty_aml,facet.by="Group", palette = c("#FB8072","#80B1D3"),risk.table = TRUE,ncensor.plot=TRUE,pval=TRUE,conf.int = FALSE,xlab="Time in years")
+```
+
+##WT1 mutation maftools lollipopPlot
+```{r}
+#aml_wt1 <- read.table("~/Desktop/WT1_report/AML_TCGA_TARGET_BEAT/WT1_mutation/All_AML_WT1_mutation.hg38.maf", header = TRUE, sep = "\t")
+aml_wt1_clinc <- read.table("~/Desktop/WT1_report/AML_TCGA_TARGET_BEAT/AML_clinical_WT1/AML_clinical_for_maftools.txt", header = TRUE, sep = "\t",stringsAsFactors=FALSE)
+
+aml_wt1 <- "~/Desktop/WT1_report/AML_TCGA_TARGET_BEAT/WT1_mutation/All_AML_WT1_mutation.hg38.maf"
+#aml_wt1_clinc <- "~/Desktop/WT1_report/AML_TCGA_TARGET_BEAT/AML_clinical_WT1/AML_clinical_for_maftools.txt"
+aml_wt1_maf <- read.maf(maf=aml_wt1,clinicalData = aml_wt1_clinc)
+```
+
+###all 
+```{r}
+pdf("~/Desktop/test0.pdf", width = 12,height = 5)
+#aml_wt1_maf
+#plotmafSummary(maf = aml_wt1_maf, rmOutlier = TRUE, addStat = 'median', dashboard = TRUE, titvRaw = FALSE)
+
+lollipopPlot(maf = aml_wt1_maf, gene = 'WT1', AACol = 'AAChange', showMutationRate = FALSE, labelPos = 382,showDomainLabel = FALSE)
+dev.off()
+```
+
+
+###based on source
+```{r}
+pdf("~/Desktop/test.pdf", width = 6,height = 3)
+lapply( unique(aml_wt1_maf@data$Center),function(i){
+  tmp.maf <- read.maf(maf=aml_wt1_maf@data[aml_wt1_maf@data$Center == i,])
+  lollipopPlot(maf = tmp.maf, gene = 'WT1', AACol = 'AAChange', showMutationRate = FALSE, labelPos = 382,showDomainLabel = FALSE)
+})
+
+dev.off()
+
+```
+
+###based on age group
+```{r}
+idx <- aml_wt1_maf@data$Tumor_Sample_Barcode %in% aml_wt1_clinc$Tumor_Sample_Barcode
+aml_wt1_maf.group <- aml_wt1_maf@data[idx,]
+aml_wt1_clinc.group<- aml_wt1_clinc[match(aml_wt1_maf.group$Tumor_Sample_Barcode, aml_wt1_clinc$Tumor_Sample_Barcode),]
+aml_wt1_maf.group <- cbind(aml_wt1_maf.group,aml_wt1_clinc.group[,c(2,4,5,6,7,8)])
+aml_wt1_maf.group[aml_wt1_maf.group$FAB == "NOS",]$FAB = "Unknown"
+
+
+aml_wt1_maf.group$ageGroup <- "Adult"
+
+aml_wt1_maf.group$ageAtDiagnosis <- as.numeric(aml_wt1_maf.group$ageAtDiagnosis)
+aml_wt1_maf.group[aml_wt1_maf.group$ageAtDiagnosis <=3,]$ageGroup <- "Infants"
+aml_wt1_maf.group[aml_wt1_maf.group$ageAtDiagnosis >3 & aml_wt1_maf.group$ageAtDiagnosis<=14,]$ageGroup <- "Children"
+aml_wt1_maf.group[aml_wt1_maf.group$ageAtDiagnosis >14 & aml_wt1_maf.group$ageAtDiagnosis<=39,]$ageGroup <- "AYA"
+#aml_wt1_maf.group[aml_wt1_maf.group$ageAtDiagnosis =="Unknow",]$ageGroup <- "Unknown"
+```
+
+```{r}
+pdf("~/Desktop/test2.pdf",width = 6,height = 3)
+lapply( unique(aml_wt1_maf.group$ageGroup),function(i){
+  tmp.maf <- read.maf(maf=aml_wt1_maf.group[aml_wt1_maf.group$ageGroup == i,])
+  lollipopPlot(maf = tmp.maf, gene = 'WT1', AACol = 'AAChange', showMutationRate = FALSE,labPosAngle=90,showDomainLabel = FALSE,printCount = TRUE)
+})
+
+dev.off()
+```
+
+##WT1 FLT3 NPM1 mutation upset
+```{r}
+df <- read.table("/Users/liuyabin/Desktop/WT1_report/AML_TCGA_TARGET_BEAT/AML_clinical_WT1/tmp/AML_clinical_all.new.txt", sep = "\t", header = TRUE,stringsAsFactors=FALSE)
+df <- df[,c(1,4,9,10)]
+df[df=="Mutation"] <- 1
+df[df=="WildType"] <- 0
+df$WT1 <- as.numeric(df$WT1)
+df$FLT3 <- as.numeric(df$FLT3)
+df$NPM1 <- as.numeric(df$NPM1)
+
+p1<-upset(df,  nset=4, 
+      matrix.color = brewer.pal(9,"Blues")[6], 
+      main.bar.color =brewer.pal(9,"Blues")[6],
+      sets.bar.color = brewer.pal(3,"Set2"),
+      order.by = "freq")
+p1
+```
+
+```{r}
+      queries = list(
+                list(query = intersects, params = list("ChAMP_low","WT1_target","DESeq2_up"), active=T,color=brewer.pal(4,"Set1")[1]),
+                list(query = intersects, params = list("ChAMP_low","WT1_target","DESeq2_down"), active=T,color=brewer.pal(4,"Set1")[1]),
+                list(query = intersects, params = list("ChAMP_low","WT1_target","DESeq2_up","TET2_target"), active=T,color=brewer.pal(4,"Set1")[1])
+                )
+```
+
+
+##WT1 PCAWG mutation  track view
+```{r}
+################
+library(trackViewer)
+library(TxDb.Hsapiens.UCSC.hg38.knownGene)
+library(org.Hs.eg.db)
+
+```
+
+```{r}
+################
+wt1_mut.pos <- read.table("/Users/liuyabin/Desktop/WT1_report/AML_TCGA_TARGET_BEAT/WT1_mutation/wt1_pcawg_mutation.pos.txt", header=FALSE)
+WT1 <- geneTrack(get("WT1", org.Hs.egSYMBOL2EG), TxDb.Hsapiens.UCSC.hg38.knownGene)[[1]]
+SNPs <- GRanges("chr11", IRanges(wt1_mut.pos$V2, width = 1), strand="-")
+SNPs$score <- wt1_mut.pos$V1
+SNPs$cex <- 0.6
+SNPs$color <- "#51C6E6"
+SNPs$border <- "gray80"
+SNPs$feature.height = .1
+WT1$dat2 <- SNPs
+```
+
+```{r}
+gr <- GRanges("chr11", IRanges(32384800,32438100))
+trs <- geneModelFromTxdb(TxDb.Hsapiens.UCSC.hg38.knownGene,
+                         org.Hs.eg.db,
+                         gr=gr)
+```
+```{r}
+optSty <- optimizeStyle(trackList(WT1), theme="col")
+
+trackList <- optSty$tracks
+viewerStyle <- optSty$style
+setTrackStyleParam(trackList[[1]], "color", c("black", "black", "black"))
+setTrackStyleParam(trackList[[1]], "ylabgp", list(cex=.6))
+vp <- viewTracks(trackList, gr=gr, viewerStyle=viewerStyle)
+```
+
+
+
+
+##example for  Peason's Chi-squared test
+```{r}
+M <- as.table(rbind(c(46,101), c(81,357)))
+dimnames(M) <- list(Event = c("阳性", "阴性"),
+                     Per = c("25%","75%"))
+M
+chisq.test(M)
+```
+
+```{r}
+M <- as.table(rbind(c(0,12), c(68,23)))
+dimnames(M) <- list(gender = c("Mut", "WT"),
+                    FLT3ITD = c("S","R"))
+M
+chisq.test(M)
+
+```
+
+```{r}
+M <- as.table(rbind(c(4,7), c(64,28)))
+dimnames(M) <- list(gender = c("Mut", "WT"),
+                    WT1 = c("S","R"))
+M
+chisq.test(M)
+fisher.test(M)
+```
+```{r}
+M <- as.table(rbind(c(1,4), c(67,31)))
+dimnames(M) <- list(gender = c("Mut", "WT"),
+                    PPP1R15A = c("S","R"))
+M
+chisq.test(M)
+fisher.test(M)
+```
+
+```{r}
+library(GEOquery)
+gpl <- getGEO('GPL17586', destdir=".")
+colnames(Table(gpl)) 
+
+probe2gene=Table(gpl)[,c(1,8)]
+head(probe2gene)
+library(stringr)  
+probe2gene$symbol=trimws(str_split(probe2gene$gene_assignment,'//',simplify = T)[,2])
+plot(table(table(probe2gene$symbol)),xlim=c(1,50))
+head(probe2gene)
+save(probe2gene,file='probe2gene.Rdata')
+```
+
